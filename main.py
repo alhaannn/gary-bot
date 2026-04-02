@@ -35,6 +35,7 @@ from trade_executor import (
     calculate_entry_price, calculate_tp_from_pips
 )
 from telegram_listener import start_listener
+from telethon.errors import PersistentTimestampOutdatedError
 
 
 async def handle_trade_entry(parsed: dict, signal_id: str):
@@ -318,31 +319,73 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Start Telegram listener in background task
-    listener_task = asyncio.create_task(start_listener(handle_message))
+    # Start Telegram listener with auto-reconnect on PersistentTimestampOutdatedError
+    max_reconnect_attempts = 3
+    reconnect_delay = 5  # seconds
+    listener_task = None
 
     try:
-        # Wait for stop event or listener task completion
-        stop_wait_task = asyncio.create_task(stop_event.wait())
-        done, pending = await asyncio.wait(
-            [listener_task, stop_wait_task],
-            return_when=asyncio.FIRST_COMPLETED
-        )
+        for attempt in range(max_reconnect_attempts):
+            logger.info(f"[MAIN] Starting Telegram listener (attempt {attempt + 1}/{max_reconnect_attempts})")
+            listener_task = asyncio.create_task(start_listener(handle_message))
 
-        if stop_event.is_set():
-            logger.info("[MAIN] Shutting down gracefully...")
+            # Wait for stop event or listener task completion
+            stop_wait_task = asyncio.create_task(stop_event.wait())
+            done, pending = await asyncio.wait(
+                [listener_task, stop_wait_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            # If stop event was set, exit the loop
+            if stop_event.is_set():
+                logger.info("[MAIN] Shutdown signal received")
+                break
+
+            # Check if listener task completed with an error
+            if listener_task in done:
+                try:
+                    # This will raise the exception if the task failed
+                    await listener_task
+                    # If we get here, the listener exited normally (unlikely)
+                    logger.info("[MAIN] Listener exited normally")
+                    break
+                except PersistentTimestampOutdatedError as e:
+                    logger.warning(f"[MAIN] Persistent timestamp error: {e}")
+                    if attempt < max_reconnect_attempts - 1:
+                        logger.info(f"[MAIN] Reconnecting in {reconnect_delay} seconds...")
+                        await asyncio.sleep(reconnect_delay)
+                        continue
+                    else:
+                        logger.error("[MAIN] Max reconnection attempts reached")
+                        raise
+                except asyncio.CancelledError:
+                    # Listener was cancelled, exit quietly
+                    break
+                except Exception as e:
+                    logger.error(f"[MAIN] Listener failed with unexpected error: {e}")
+                    # For other errors, don't retry automatically
+                    raise
+
+            # Cancel remaining tasks
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    except KeyboardInterrupt:
+        logger.info("[MAIN] KeyboardInterrupt received")
+    except Exception as e:
+        logger.error(f"[MAIN] Fatal error: {e}")
+    finally:
+        # Cleanup
+        if listener_task and not listener_task.done():
             listener_task.cancel()
             try:
                 await listener_task
             except asyncio.CancelledError:
                 pass
-
-    except KeyboardInterrupt:
-        logger.info("[MAIN] KeyboardInterrupt received")
-    except Exception as e:
-        logger.error(f"[MAIN] Unexpected error: {e}")
-    finally:
-        # Cleanup
         disconnect_mt5()
         logger.info("[MAIN] GaryBot shutdown complete")
 

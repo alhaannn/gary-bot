@@ -12,7 +12,8 @@ from telethon.errors import (
     SessionPasswordNeededError,
     PhoneNumberInvalidError,
     ApiIdInvalidError,
-    FloodWaitError
+    FloodWaitError,
+    PersistentTimestampOutdatedError
 )
 
 from logger import get_logger
@@ -93,6 +94,18 @@ async def start_listener(message_handler_callback):
         logger.error("[TELEGRAM] ❌ Invalid API ID/HASH. Check TELEGRAM_API_ID and TELEGRAM_API_HASH")
     except FloodWaitError as e:
         logger.error(f"[TELEGRAM] ❌ Flood wait: {e.seconds} seconds. Too many requests.")
+    except PersistentTimestampOutdatedError as e:
+        logger.warning(f"[TELEGRAM] ⚠️  Persistent timestamp outdated: {e}")
+        logger.info("[TELEGRAM] Attempting to recreate session and reconnect...")
+        # Delete the outdated session file and reconnect
+        import os
+        try:
+            if os.path.exists(SESSION_FILE):
+                os.remove(SESSION_FILE)
+                logger.info(f"[TELEGRAM] Removed outdated session file: {SESSION_FILE}")
+        except Exception as remove_error:
+            logger.error(f"[TELEGRAM] Failed to remove session file: {remove_error}")
+        raise  # Re-raise to trigger reconnection
     except KeyboardInterrupt:
         logger.info("[TELEGRAM] Shutting down...")
         await client.disconnect()
