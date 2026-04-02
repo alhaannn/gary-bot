@@ -318,6 +318,54 @@ def move_sl_to_breakeven(ticket: int, entry_price: float, signal_id: str = "") -
         return False
 
 
+def modify_sl(ticket: int, new_sl: float, signal_id: str = "") -> bool:
+    """
+    Modify stop loss of an open position.
+
+    Args:
+        ticket: Position ticket to modify
+        new_sl: New stop loss price (float)
+        signal_id: Optional signal ID for logging context
+
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        # Find position
+        position = mt5.positions_get(ticket=ticket)
+
+        if position is None or len(position) == 0:
+            logger.warning(f"[MT5] [{signal_id}] Ticket {ticket} not found for SL modification")
+            return False
+
+        pos = position[0]
+
+        # Keep existing TP, change SL
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "position": ticket,
+            "symbol": SYMBOL,
+            "sl": round(new_sl, ENTRY_PRICE_PRECISION),
+            "tp": pos.tp,  # Keep existing TP
+            "deviation": SLIPPAGE,
+            "magic": MAGIC_NUMBER,
+        }
+
+        logger.info(f"[MT5] [{signal_id}] Modifying SL for ticket {ticket}: {pos.sl:.2f} -> {new_sl:.2f} (TP: {pos.tp})")
+        result = mt5.order_send(request)
+
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            logger.error(f"[MT5] [{signal_id}] SL modification failed: {result.comment} (code {result.retcode})")
+            return False
+
+        logger.info(f"[MT5] [{signal_id}] ✅ SL modified successfully for ticket {ticket}")
+        return True
+
+    except Exception as e:
+        logger.error(f"[MT5] [{signal_id}] Exception modifying SL: {e}")
+        return False
+
+
 def calculate_entry_price(entry_high: float, entry_low: float) -> float:
     """Calculate entry price as midpoint, rounded to 2 decimals."""
     price = (float(entry_high) + float(entry_low)) / 2

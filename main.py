@@ -31,7 +31,7 @@ from trade_manager import (
 )
 from trade_executor import (
     connect_mt5, disconnect_mt5,
-    open_two_trades, close_trade, move_sl_to_breakeven,
+    open_two_trades, close_trade, move_sl_to_breakeven, modify_sl,
     calculate_entry_price, calculate_tp_from_pips
 )
 from telegram_listener import start_listener
@@ -186,6 +186,47 @@ async def handle_sl_hit_signal(parsed: dict):
         mark_both_closed(signal_id)
 
 
+async def handle_sl_modify_signal(parsed: dict):
+    """
+    Handle SL_MODIFY signal: modify stop loss on open positions.
+    """
+    logger.info("[MAIN] 🔧 Processing SL_MODIFY signal")
+
+    new_sl = parsed["new_sl"]
+    open_groups = get_open_groups()
+
+    if not open_groups:
+        logger.warning("[MAIN] ⚠️ No open groups to modify SL")
+        return
+
+    logger.info(f"[MAIN] Modifying SL to {new_sl:.2f} for {len(open_groups)} open group(s)")
+
+    success_count = 0
+    for group in open_groups:
+        signal_id = group["signal_id"]
+        ticket1 = group.get("ticket1")
+        ticket2 = group.get("ticket2")
+
+        # Modify SL for T1 if still open
+        if ticket1 is not None and not group.get("t1_closed", False):
+            if modify_sl(ticket1, new_sl, signal_id):
+                success_count += 1
+            else:
+                logger.error(f"[MAIN] ❌ Failed to modify SL for T1 {ticket1}")
+
+        # Modify SL for T2 if still open
+        if ticket2 is not None and not group.get("t2_closed", False):
+            if modify_sl(ticket2, new_sl, signal_id):
+                success_count += 1
+            else:
+                logger.error(f"[MAIN] ❌ Failed to modify SL for T2 {ticket2}")
+
+    if success_count > 0:
+        logger.info(f"[MAIN] ✅ SL_MODIFY: Modified {success_count} position(s) to {new_sl:.2f}")
+    else:
+        logger.warning("[MAIN] ⚠️ No positions were modified")
+
+
 async def handle_ignore_signal(parsed: dict):
     """Handle IGNORE signal: do nothing."""
     logger.debug("[MAIN] ⏭️ IGNORE - Skipping")
@@ -224,6 +265,9 @@ async def handle_message(message_text: str):
 
         elif signal_type == "SL_HIT":
             await handle_sl_hit_signal(parsed)
+
+        elif signal_type == "SL_MODIFY":
+            await handle_sl_modify_signal(parsed)
 
         elif signal_type == "IGNORE":
             await handle_ignore_signal(parsed)

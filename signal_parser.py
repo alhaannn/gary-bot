@@ -50,7 +50,18 @@ CLASSIFY messages into exactly one type:
    - "This setup hit SL. Wait for recovery"
    - "This setup hit my risk."
 
-5. IGNORE - Everything else:
+5. SL_MODIFY - Modify stop loss on open positions
+   Examples:
+   - "move sl to 4581"
+   - "change sl to 4575"
+   - "adjust stop loss to 4580"
+   - "sl 4581 now"
+   - "stop loss move to 4578"
+   - "move stop loss slightly big to 4581"
+
+   Must include: a new stop loss price (XAUUSD price in 4000-5000 range)
+
+6. IGNORE - Everything else:
    - "Ready", "Ready !", "Ready recovery !"
    - "Ready, i want to take some risk."
    - "I want to take some risk now"
@@ -79,6 +90,12 @@ For ENTRY:
   "tp2_pips": <TP2 pips as int or null>
 }
 
+For SL_MODIFY:
+{
+  "type": "SL_MODIFY",
+  "new_sl": <stop loss price as float>
+}
+
 For all other types:
 {
   "type": "PARTIAL" | "CLOSE" | "SL_HIT" | "IGNORE"
@@ -89,6 +106,7 @@ PARSING RULES:
 - Entry low is the smaller number regardless of BUY/SELL
 - If TP is "100/200Pips" → tp1=null, tp2=null, tp1_pips=100, tp2_pips=200
 - Extract numeric values from text (ignore commas, spaces)
+- For SL_MODIFY: extract the single price mentioned as new_sl
 - When in doubt → return IGNORE
 """
 
@@ -197,6 +215,27 @@ def parse_signal(message_text: str) -> Dict[str, Any]:
             parsed["tp2_pips"] = int(tp2_pips) if tp2_pips is not None else None
 
             logger.debug(f"[PARSER] ENTRY details: {direction} @ {entry_low}-{entry_high} SL:{sl}")
+
+        # Validate SL_MODIFY response
+        elif parsed.get("type") == "SL_MODIFY":
+            new_sl = parsed.get("new_sl")
+
+            if new_sl is None:
+                logger.warning("[PARSER] SL_MODIFY missing new_sl field")
+                return {"type": "IGNORE"}
+
+            try:
+                new_sl = float(new_sl)
+                # Validate price is in XAUUSD range (4000-5000)
+                if not (4000 <= new_sl <= 5000):
+                    logger.warning(f"[PARSER] SL_MODIFY new_sl out of range: {new_sl}")
+                    return {"type": "IGNORE"}
+                parsed["new_sl"] = new_sl
+            except (TypeError, ValueError):
+                logger.warning("[PARSER] SL_MODIFY new_sl is not a valid number")
+                return {"type": "IGNORE"}
+
+            logger.info(f"[PARSER] SL_MODIFY details: new SL = {new_sl:.2f}")
 
         return parsed
 
