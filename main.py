@@ -1,5 +1,5 @@
 """
-Alhan-bot - Automated Gold Trading Bot
+GaryBot - Automated Gold Trading Bot
 
 Main orchestrator that coordinates MT5, Telegram listener, and signal processing.
 
@@ -292,7 +292,7 @@ async def main():
     3. Start Telegram listener (blocking)
     4. Handle shutdown gracefully
     """
-    logger.info("[MAIN] 🚀 Starting Alhan-bot...")
+    logger.info("[MAIN] 🚀 Starting GaryBot...")
 
     # Check config placeholders
     if isinstance(config.TELEGRAM_API_ID, str) and "YOUR_" in config.TELEGRAM_API_ID:
@@ -344,7 +344,7 @@ async def main():
     finally:
         # Cleanup
         disconnect_mt5()
-        logger.info("[MAIN] Alhan-bot shutdown complete")
+        logger.info("[MAIN] GaryBot shutdown complete")
 
     return 0
 

@@ -1,6 +1,6 @@
-# Alhan-bot - Automated Gold Trading Bot
+# GaryBot - Automated Gold Trading Bot
 
-A fully automated trading bot that monitors Telegram channel [@traderalhan](https://t.me/traderalhan) for gold trading signals and executes trades automatically on MetaTrader5.
+A fully automated trading bot that monitors Telegram channel [@Gary_TheTrader](https://t.me/Gary_TheTrader) for gold trading signals and executes trades automatically on MetaTrader5.
 
 ## Features
 
@@ -31,7 +31,7 @@ gary-bot/
 ├── requirements.txt       # Python dependencies
 ├── .gitignore             # Git ignore rules
 ├── trades.json            # Created at runtime - trade state
-└── alhan_bot.log          # Created at runtime - debug logs
+└── gary_bot.log           # Created at runtime - debug logs
 ```
 
 ## Prerequisites
@@ -84,6 +84,24 @@ pip install -r requirements.txt
 
    **Important:** Never commit `config.py` to git. It's already in `.gitignore`.
 
+### 4. Customize for Your Channel/Trader (Optional)
+
+The bot is pre-configured for **@Gary_TheTrader** with specific signal formats. To use with a different Telegram channel:
+
+1. **Change the channel name** in `config.py`:
+   ```python
+   TELEGRAM_CHANNEL = "YourTraderName"  # Without @
+   ```
+
+2. **Adapt the signal parser** in `signal_parser.py`:
+   - Update the `SYSTEM_PROMPT` with your trader's exact signal formats
+   - Add examples of ENTRY, PARTIAL, CLOSE, SL_MODIFY messages
+   - The AI will learn to recognize their specific format
+
+3. **Test the parser** by sending sample messages and checking the logs.
+
+The default configuration works for Gary's signal style as documented in this README.
+
 ### 4. Verify MT5 Installation
 
 Make sure MetaTrader5 Python package can connect:
@@ -106,12 +124,12 @@ python main.py
 - The bot will attempt to connect to MT5
 - If connection fails, check that MT5 terminal is running and credentials are correct
 - Telegram authentication will prompt for verification code (one-time)
-- Session is saved to `alhan_bot_session` for future runs
+- Session is saved to `gary_bot_session` for future runs
 
 ### What Happens
 
 1. Bot connects to MT5 and logs account info
-2. Connects to Telegram and monitors @traderalhan
+2. Connects to Telegram and monitors @Gary_TheTrader
 3. Each new message is sent to Groq for classification
 4. Based on signal type:
    - **ENTRY**: Opens 2 trades with calculated SL/TP
@@ -193,7 +211,7 @@ This allows the bot to recover from restarts without losing track of positions.
 
 ## Logging
 
-Logs are written to both console and `alhan_bot.log`:
+Logs are written to both console and `gary_bot.log`:
 
 - **Format**: `YYYY-MM-DD HH:MM:SS [LEVEL] message`
 - **Console**: INFO level and above
@@ -227,7 +245,7 @@ Logs are written to both console and `alhan_bot.log`:
 - Ensure MetaTrader5 Python package installed
 
 ### Telegram Authentication Issues
-- Delete `alhan_bot_session.session` and re-authenticate
+- Delete `gary_bot_session.session` and re-authenticate
 - Verify API_ID and API_HASH from https://my.telegram.org/apps
 - Check phone number format includes country code (e.g., "+1234567890")
 
@@ -244,7 +262,7 @@ Logs are written to both console and `alhan_bot.log`:
 
 ### Bot Crashes
 All errors are caught and logged. Check:
-- `alhan_bot.log` for full traceback
+- `gary_bot.log` for full traceback
 - MT5 connection stability
 - Memory usage (24/7 operation)
 
@@ -254,7 +272,7 @@ All errors are caught and logged. Check:
 2. Use environment variables in production if desired
 3. The `.gitignore` config.py protects your secrets
 4. `trades.json` contains MT5 ticket numbers - keep private
-5. Telegram session file (`alhan_bot_session.session`) grants access to your Telegram account - keep secure
+5. Telegram session file (`gary_bot_session.session`) grants access to your Telegram account - keep secure
 
 ## Production Deployment
 
@@ -271,8 +289,8 @@ Recommended for Windows Server EC2:
 ### Running as Windows Service (NSSM)
 
 ```bash
-nssm install Alhan-bot "C:\Python39\python.exe" "C:\gary-bot\main.py"
-nssm start Alhan-bot
+nssm install GaryBot "C:\Python39\python.exe" "C:\gary-bot\main.py"
+nssm start GaryBot
 ```
 
 ## Disclaimer
@@ -294,7 +312,7 @@ MIT License - feel free to modify and use as needed.
 
 For issues, feature requests, or questions:
 - Open an issue on GitHub
-- Check logs in `alhan_bot.log`
+- Check logs in `gary_bot.log`
 - Verify all prerequisites are met
 
 ---

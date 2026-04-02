@@ -1,7 +1,7 @@
 """
 Signal Parser - Groq API integration for signal classification
 
-Parses Telegram messages from Alhan into structured trade signals.
+Parses Telegram messages from Gary into structured trade signals.
 Uses Groq API with llama-3.3-70b-versatile model.
 """
 
@@ -16,8 +16,8 @@ from config import GROQ_API_KEY, GROQ_MODEL, GROQ_TIMEOUT
 
 logger = get_logger()
 
-# System prompt defining Alhan's exact signal formats
-SYSTEM_PROMPT = """You are a Gold (XAUUSD) trading signal classifier for Alhan.
+# System prompt defining Gary's exact signal formats
+SYSTEM_PROMPT = """You are a Gold (XAUUSD) trading signal classifier for Gary-TheTrader.
 
 CLASSIFY messages into exactly one type:
 

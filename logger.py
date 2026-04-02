@@ -1,5 +1,5 @@
 """
-Logging configuration for Alhan-bot
+Logging configuration for GaryBot
 
 Provides a single configured logger instance with:
 - Console output (INFO and above)
@@ -24,7 +24,7 @@ def setup_logger():
     if _logger is not None:
         return _logger
 
-    logger = logging.getLogger("alhan_bot")
+    logger = logging.getLogger("gary_bot")
     logger.setLevel(logging.DEBUG)
 
     # Prevent adding handlers multiple times

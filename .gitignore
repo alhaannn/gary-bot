@@ -45,8 +45,8 @@ Thumbs.db
 
 # Project specific
 trades.json
-alhan_bot.log
-alhan_bot_session.session
+gary_bot.log
+gary_bot.session
 config.py
 instructions.md
 
