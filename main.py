@@ -279,8 +279,9 @@ async def main():
 
     try:
         # Wait for stop event or listener task completion
+        stop_wait_task = asyncio.create_task(stop_event.wait())
         done, pending = await asyncio.wait(
-            [listener_task, stop_event.wait()],
+            [listener_task, stop_wait_task],
             return_when=asyncio.FIRST_COMPLETED
         )
 
