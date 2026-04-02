@@ -53,6 +53,20 @@ CLASSIFY messages into exactly one type:
    - "Boom ! Can take the profit 100PIPS"
    - "200Pips ! Can take as Tp2"
    - "100PIPS can close all"
+   - "close all now"
+   - "take all profit"
+   - "exit all positions"
+   - "close everything"
+   - "book full profit"
+   - "take full profit"
+   - "close remaining"
+   - "exit trade"
+   - "close position"
+   - "close T2"
+   - "take profit all"
+   - "close all positions"
+   - "full close"
+   - "exit everything"
 
 4. SL_HIT - Stop loss hit (MT5 auto-closed)
    Examples:
