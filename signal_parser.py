@@ -38,6 +38,15 @@ CLASSIFY messages into exactly one type:
    - "60Pips now in profit can secure some now"
    - "Almost 100Pips ! Can take some profit"
    - "60Pips ! Scalper can secure some"
+   - "secure your trades"
+   - "secure some profit now"
+   - "take half profit"
+   - "close half position"
+   - "secure half"
+   - "take some profit now"
+   - "book some profit"
+   - "lock in profits"
+   - Any message indicating partial profit taking or securing gains
 
 3. CLOSE - Close remaining position (T2) fully
    Examples:
