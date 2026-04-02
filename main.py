@@ -251,7 +251,7 @@ async def main():
     logger.info("[MAIN] 🚀 Starting Alhan-bot...")
 
     # Check config placeholders
-    if "YOUR_" in config.TELEGRAM_API_ID:
+    if isinstance(config.TELEGRAM_API_ID, str) and "YOUR_" in config.TELEGRAM_API_ID:
         logger.warning("[MAIN] ⚠️ Config placeholders detected! Fill in config.py with your credentials.")
 
     # Connect to MT5

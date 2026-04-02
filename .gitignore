@@ -48,6 +48,10 @@ trades.json
 alhan_bot.log
 alhan_bot_session.session
 config.py
+
+# Claude Code
+.claude/
+
 secrets.env
 *.pem
 *.key
