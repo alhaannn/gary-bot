@@ -7,6 +7,8 @@ to the message handler callback.
 
 import asyncio
 import logging
+import os
+import time
 from telethon import TelegramClient, events
 from telethon.errors import (
     SessionPasswordNeededError,
@@ -15,6 +17,7 @@ from telethon.errors import (
     FloodWaitError,
     PersistentTimestampOutdatedError
 )
+from telethon.sessions import SQLiteSession
 
 from logger import get_logger
 from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE, TELEGRAM_CHANNEL, SESSION_FILE
@@ -96,16 +99,24 @@ async def start_listener(message_handler_callback):
         logger.error(f"[TELEGRAM] ❌ Flood wait: {e.seconds} seconds. Too many requests.")
     except PersistentTimestampOutdatedError as e:
         logger.warning(f"[TELEGRAM] ⚠️  Persistent timestamp outdated: {e}")
-        logger.info("[TELEGRAM] Attempting to recreate session and reconnect...")
-        # Delete the outdated session file and reconnect
-        import os
+        logger.info("[TELEGRAM] Attempting to refresh session timestamp...")
         try:
-            if os.path.exists(SESSION_FILE):
-                os.remove(SESSION_FILE)
-                logger.info(f"[TELEGRAM] Removed outdated session file: {SESSION_FILE}")
-        except Exception as remove_error:
-            logger.error(f"[TELEGRAM] Failed to remove session file: {remove_error}")
-        raise  # Re-raise to trigger reconnection
+            # Load and update the session's timestamp without deleting the session
+            session = SQLiteSession(SESSION_FILE)
+            session._load_session()
+            session.date = int(time.time())
+            session.save()
+            logger.info("[TELEGRAM] ✅ Session timestamp refreshed")
+        except Exception as refresh_error:
+            logger.error(f"[TELEGRAM] Failed to refresh session: {refresh_error}")
+            # Fallback: delete session (will require manual re-auth)
+            try:
+                if os.path.exists(SESSION_FILE):
+                    os.remove(SESSION_FILE)
+                    logger.info("[TELEGRAM] Removed corrupted session file")
+            except Exception as remove_error:
+                logger.error(f"[TELEGRAM] Failed to remove session file: {remove_error}")
+        raise  # Re-raise to trigger reconnection in main.py
     except KeyboardInterrupt:
         logger.info("[TELEGRAM] Shutting down...")
         await client.disconnect()
