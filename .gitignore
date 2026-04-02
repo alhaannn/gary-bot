@@ -48,6 +48,7 @@ trades.json
 alhan_bot.log
 alhan_bot_session.session
 config.py
+instructions.md
 
 # Claude Code
 .claude/
