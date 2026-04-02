@@ -7,7 +7,7 @@ to the message handler callback.
 
 import asyncio
 import logging
-from telethon import TelegramClient
+from telethon import TelegramClient, events
 from telethon.errors import (
     SessionPasswordNeededError,
     PhoneNumberInvalidError,
