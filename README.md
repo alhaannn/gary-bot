@@ -1,6 +1,6 @@
-# GaryBot - Automated Gold Trading Bot
+# Alhan-bot - Automated Gold Trading Bot
 
-A fully automated trading bot that monitors Telegram channel [@Gary_TheTrader](https://t.me/Gary_TheTrader) for gold trading signals and executes trades automatically on MetaTrader5.
+A fully automated trading bot that monitors Telegram channel [@traderalhan](https://t.me/traderalhan) for gold trading signals and executes trades automatically on MetaTrader5.
 
 ## Features
 
@@ -31,7 +31,7 @@ gary-bot/
 ├── requirements.txt       # Python dependencies
 ├── .gitignore             # Git ignore rules
 ├── trades.json            # Created at runtime - trade state
-└── gary_bot.log           # Created at runtime - debug logs
+└── alhan_bot.log          # Created at runtime - debug logs
 ```
 
 ## Prerequisites
@@ -106,12 +106,12 @@ python main.py
 - The bot will attempt to connect to MT5
 - If connection fails, check that MT5 terminal is running and credentials are correct
 - Telegram authentication will prompt for verification code (one-time)
-- Session is saved to `gary_bot_session` for future runs
+- Session is saved to `alhan_bot_session` for future runs
 
 ### What Happens
 
 1. Bot connects to MT5 and logs account info
-2. Connects to Telegram and monitors @Gary_TheTrader
+2. Connects to Telegram and monitors @traderalhan
 3. Each new message is sent to Groq for classification
 4. Based on signal type:
    - **ENTRY**: Opens 2 trades with calculated SL/TP
@@ -193,7 +193,7 @@ This allows the bot to recover from restarts without losing track of positions.
 
 ## Logging
 
-Logs are written to both console and `gary_bot.log`:
+Logs are written to both console and `alhan_bot.log`:
 
 - **Format**: `YYYY-MM-DD HH:MM:SS [LEVEL] message`
 - **Console**: INFO level and above
@@ -227,7 +227,7 @@ Logs are written to both console and `gary_bot.log`:
 - Ensure MetaTrader5 Python package installed
 
 ### Telegram Authentication Issues
-- Delete `gary_bot_session.session` and re-authenticate
+- Delete `alhan_bot_session.session` and re-authenticate
 - Verify API_ID and API_HASH from https://my.telegram.org/apps
 - Check phone number format includes country code (e.g., "+1234567890")
 
@@ -244,7 +244,7 @@ Logs are written to both console and `gary_bot.log`:
 
 ### Bot Crashes
 All errors are caught and logged. Check:
-- `gary_bot.log` for full traceback
+- `alhan_bot.log` for full traceback
 - MT5 connection stability
 - Memory usage (24/7 operation)
 
@@ -254,7 +254,7 @@ All errors are caught and logged. Check:
 2. Use environment variables in production if desired
 3. The `.gitignore` config.py protects your secrets
 4. `trades.json` contains MT5 ticket numbers - keep private
-5. Telegram session file (`gary_bot_session.session`) grants access to your Telegram account - keep secure
+5. Telegram session file (`alhan_bot_session.session`) grants access to your Telegram account - keep secure
 
 ## Production Deployment
 
@@ -271,8 +271,8 @@ Recommended for Windows Server EC2:
 ### Running as Windows Service (NSSM)
 
 ```bash
-nssm install GaryBot "C:\Python39\python.exe" "C:\gary-bot\main.py"
-nssm start GaryBot
+nssm install Alhan-bot "C:\Python39\python.exe" "C:\gary-bot\main.py"
+nssm start Alhan-bot
 ```
 
 ## Disclaimer
@@ -294,7 +294,7 @@ MIT License - feel free to modify and use as needed.
 
 For issues, feature requests, or questions:
 - Open an issue on GitHub
-- Check logs in `gary_bot.log`
+- Check logs in `alhan_bot.log`
 - Verify all prerequisites are met
 
 ---

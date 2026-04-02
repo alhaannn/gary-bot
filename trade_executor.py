@@ -184,7 +184,7 @@ def open_two_trades(
         direction=direction,
         sl=sl,
         tp=tp1,
-        comment=f"Gary_T1_{signal_id}",
+        comment=f"Alhan_T1_{signal_id}",
         signal_id=signal_id
     )
 
@@ -200,7 +200,7 @@ def open_two_trades(
         direction=direction,
         sl=sl,
         tp=tp2,
-        comment=f"Gary_T2_{signal_id}",
+        comment=f"Alhan_T2_{signal_id}",
         signal_id=signal_id
     )
 
@@ -250,7 +250,7 @@ def close_trade(ticket: int, signal_id: str = "") -> bool:
             "price": price,
             "deviation": SLIPPAGE,
             "magic": MAGIC_NUMBER,
-            "comment": f"Gary_Close_{signal_id}"[:32],
+            "comment": f"Alhan_Close_{signal_id}"[:32],
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
