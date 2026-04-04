@@ -1,14 +1,13 @@
 """
-Telegram Listener - Async Telegram channel monitor using Telethon
+Telegram Listener - Async multi-channel Telegram monitor using Telethon
 
-Monitors the specified channel for new messages and forwards text
-to the message handler callback.
+Monitors multiple channels simultaneously and forwards messages to the handler
+with channel context. Includes strict timestamp validation.
 """
 
 import asyncio
 import logging
-import os
-import time
+from datetime import datetime, timezone
 from telethon import TelegramClient, events
 from telethon.errors import (
     SessionPasswordNeededError,
@@ -17,31 +16,82 @@ from telethon.errors import (
     FloodWaitError,
     PersistentTimestampOutdatedError
 )
-from telethon.sessions import SQLiteSession
 
 from logger import get_logger
-from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE, TELEGRAM_CHANNEL, SESSION_FILE
+from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE, CHANNELS, USE_LEGACY_SINGLE_CHANNEL, LEGACY_CHANNEL, TIMESTAMP_THRESHOLD
 
 logger = get_logger()
 
 
-async def start_listener(message_handler_callback):
+def is_message_timestamp_valid(message, threshold_seconds: int = TIMESTAMP_THRESHOLD) -> bool:
     """
-    Start listening to the Telegram channel.
+    Validate that message timestamp is within threshold of current UTC time.
+
+    Rejects messages that are too old (backlog) or too far in the future (desync).
 
     Args:
-        message_handler_callback: Async function that accepts (message_text: str)
+        message: Telethon Message object with .date attribute
+        threshold_seconds: Max allowed age difference in seconds (default from config)
 
-    On first run, will prompt for phone verification code.
+    Returns:
+        True if message is fresh enough, False if outdated
+    """
+    msg_date = message.date
+
+    # Ensure message.date is timezone-aware (Telethon provides UTC)
+    if msg_date.tzinfo is None:
+        msg_date = msg_date.replace(tzinfo=timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    diff = abs((now - msg_date).total_seconds())
+
+    if diff > threshold_seconds:
+        logger.debug(f"[TELEGRAM] Dropping outdated message: age={diff:.1f}s (> {threshold_seconds}s)")
+        return False
+
+    return True
+
+
+async def start_multi_listener(message_handler_callback):
+    """
+    Start listening to multiple Telegram channels.
+
+    Features:
+    - sequential_updates=True: ensures ordered message delivery per channel
+    - incoming=True: only processes incoming messages (not outgoing/edits)
+    - func filter: ensures message exists
+    - Timestamp validation: rejects stale/future messages before processing
+
+    Args:
+        message_handler_callback: Async function that accepts (message_text: str, channel_name: str)
+
+    On first run, will prompt for phone verification code if needed.
     Session is saved to disk for subsequent runs.
     """
-    logger.info("[TELEGRAM] Initializing Telegram client...")
+    logger.info("[TELEGRAM] Initializing multi-channel Telegram client...")
 
-    # Create client
-    client = TelegramClient(SESSION_FILE, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+    # Determine which channels to listen
+    if USE_LEGACY_SINGLE_CHANNEL:
+        channels_to_listen = [{"name": "gary", "username": LEGACY_CHANNEL, "enabled": True}]
+        logger.info("[TELEGRAM] Running in LEGACY single-channel mode")
+    else:
+        channels_to_listen = [c for c in CHANNELS if c["enabled"]]
+        logger.info(f"[TELEGRAM] Multi-channel mode: {len(channels_to_listen)} channels enabled")
+
+    if not channels_to_listen:
+        logger.error("[TELEGRAM] No channels enabled! Check CHANNELS configuration.")
+        return
+
+    # Create client with sequential_updates
+    client = TelegramClient(
+        "gary_bot_session",
+        TELEGRAM_API_ID,
+        TELEGRAM_API_HASH,
+        sequential_updates=True
+    )
 
     try:
-        # Connect and start
+        # Connect and authorize
         await client.connect()
         if not await client.is_user_authorized():
             logger.info("[TELEGRAM] First-time authorization required")
@@ -56,39 +106,57 @@ async def start_listener(message_handler_callback):
         else:
             logger.info("[TELEGRAM] Using existing session")
 
-        # Get channel entity
-        logger.info(f"[TELEGRAM] Joining channel: {TELEGRAM_CHANNEL}")
-        channel = await client.get_entity(TELEGRAM_CHANNEL)
-
-        # Register message handler
-        @client.on(events.NewMessage(chats=channel))
-        async def on_new_message(event):
-            """
-            Handle new messages from the channel.
-            Only process text messages; skip media-only posts.
-            """
+        # Resolve all channel entities and register handlers
+        channel_handlers = []
+        for channel_config in channels_to_listen:
             try:
-                # Extract message text
-                message_text = event.message.message
-                if message_text is None:
-                    # Media-only or empty message
-                    logger.debug("[TELEGRAM] Skipping media-only/empty message")
-                    return
+                channel_entity = await client.get_entity(channel_config["username"])
+                channel_name = channel_config["name"]
 
-                message_text = message_text.strip()
-                if not message_text:
-                    logger.debug("[TELEGRAM] Skipping empty message")
-                    return
+                # Create handler with bound channel_name using closure
+                @client.on(events.NewMessage(
+                    chats=channel_entity,
+                    incoming=True,
+                    func=lambda e: e.message
+                ))
+                async def make_handler(ch_name):
+                    async def on_new_message(event):
+                        try:
+                            # Timestamp validation first
+                            message = event.message
+                            if not is_message_timestamp_valid(message, TIMESTAMP_THRESHOLD):
+                                return
 
-                logger.info(f"[TELEGRAM] 📨 New message: {message_text[:80]}{'...' if len(message_text) > 80 else ''}")
+                            # Extract text
+                            message_text = message.message
+                            if message_text is None:
+                                logger.debug(f"[{ch_name}] Skipping media-only/empty message")
+                                return
 
-                # Forward to handler (non-blocking to avoid lag)
-                asyncio.create_task(handle_message_safe(message_text, message_handler_callback))
+                            message_text = message_text.strip()
+                            if not message_text:
+                                logger.debug(f"[{ch_name}] Skipping empty message")
+                                return
 
+                            logger.info(f"[{ch_name}] 📨 New message: {message_text[:80]}{'...' if len(message_text) > 80 else ''}")
+
+                            # Call main handler with channel context
+                            asyncio.create_task(message_handler_callback(message_text, ch_name))
+                        except Exception as e:
+                            logger.error(f"[{ch_name}] Error in message handler: {e}")
+                    return on_new_message
+
+                handler = make_handler(channel_name)
+                channel_handlers.append((channel_name, handler))
+                logger.info(f"[TELEGRAM] ✅ Registered handler for channel: {channel_name} ({channel_config['username']})")
             except Exception as e:
-                logger.error(f"[TELEGRAM] Error processing message: {e}")
+                logger.error(f"[TELEGRAM] Failed to register channel {channel_config.get('username')}: {e}")
 
-        logger.info("[TELEGRAM] ✅ Listening for messages... (press Ctrl+C to stop)")
+        if not channel_handlers:
+            logger.error("[TELEGRAM] No channel handlers registered! Exiting.")
+            return
+
+        logger.info("[TELEGRAM] ✅ Listening on all channels... (press Ctrl+C to stop)")
         await client.run_until_disconnected()
 
     except PhoneNumberInvalidError:
@@ -99,24 +167,8 @@ async def start_listener(message_handler_callback):
         logger.error(f"[TELEGRAM] ❌ Flood wait: {e.seconds} seconds. Too many requests.")
     except PersistentTimestampOutdatedError as e:
         logger.warning(f"[TELEGRAM] ⚠️  Persistent timestamp outdated: {e}")
-        logger.info("[TELEGRAM] Attempting to refresh session timestamp...")
-        try:
-            # Load and update the session's timestamp without deleting the session
-            session = SQLiteSession(SESSION_FILE)
-            session._load_session()
-            session.date = int(time.time())
-            session.save()
-            logger.info("[TELEGRAM] ✅ Session timestamp refreshed")
-        except Exception as refresh_error:
-            logger.error(f"[TELEGRAM] Failed to refresh session: {refresh_error}")
-            # Fallback: delete session (will require manual re-auth)
-            try:
-                if os.path.exists(SESSION_FILE):
-                    os.remove(SESSION_FILE)
-                    logger.info("[TELEGRAM] Removed corrupted session file")
-            except Exception as remove_error:
-                logger.error(f"[TELEGRAM] Failed to remove session file: {remove_error}")
-        raise  # Re-raise to trigger reconnection in main.py
+        logger.info("[TELEGRAM] This indicates client-server time desync or stale session. Reconnecting...")
+        raise
     except KeyboardInterrupt:
         logger.info("[TELEGRAM] Shutting down...")
         await client.disconnect()
@@ -130,14 +182,7 @@ async def start_listener(message_handler_callback):
         await client.disconnect()
 
 
-async def handle_message_safe(message_text: str, callback):
-    """
-    Wrapper to call callback with exception handling.
-    Prevents a single message error from crashing the listener.
-    """
-    try:
-        await callback(message_text)
-    except Exception as e:
-        logger.error(f"[TELEGRAM] Exception in message handler: {e}")
-        import traceback
-        logger.debug(f"[TELEGRAM] Traceback: {traceback.format_exc()}")
+# Backward compatibility: keep the old function name for single-channel mode
+async def start_listener(message_handler_callback):
+    """Legacy wrapper for backward compatibility."""
+    await start_multi_listener(message_handler_callback)

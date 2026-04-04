@@ -1,7 +1,8 @@
 """
-GaryBot - Automated Gold Trading Bot
+GaryBot - Automated Gold Trading Bot (Multi-Channel)
 
-Main orchestrator that coordinates MT5, Telegram listener, and signal processing.
+Main orchestrator that coordinates MT5, Telegram listener, and signal processing
+for multiple channels with isolated state.
 
 Usage:
     python main.py
@@ -11,9 +12,11 @@ First run will prompt for Telegram phone verification.
 """
 
 import asyncio
+import os
 import signal
 import sys
 from datetime import datetime
+from typing import Optional, Dict
 
 # Import config first (others depend on it)
 import config
@@ -27,22 +30,96 @@ from signal_parser import parse_signal
 from trade_manager import (
     load_trades, add_trade_group,
     get_open_groups, get_partial_eligible_groups,
-    mark_t1_closed, mark_t2_closed, mark_both_closed
+    mark_ticket_closed, mark_partial_applied
 )
 from trade_executor import (
     connect_mt5, disconnect_mt5,
-    open_two_trades, close_trade, move_sl_to_breakeven, modify_sl,
+    open_multiple_trades, close_trade, move_sl_to_breakeven, modify_sl,
     calculate_entry_price, calculate_tp_from_pips
 )
-from telegram_listener import start_listener
+from telegram_listener import start_multi_listener
 from telethon.errors import PersistentTimestampOutdatedError
 
 
-async def handle_trade_entry(parsed: dict, signal_id: str):
+def get_channel_config(channel_name: str) -> Optional[Dict]:
+    """Get channel configuration by name. Supports legacy single-channel mode."""
+    if config.USE_LEGACY_SINGLE_CHANNEL:
+        # In legacy mode, return a default config for 'gary' using legacy channel
+        if channel_name == "gary":
+            return {
+                "name": "gary",
+                "username": config.LEGACY_CHANNEL,
+                "enabled": True,
+                "trades_per_signal": 2,
+                "prompt_file": "prompts/gary.txt"
+            }
+        return None
+
+    # Multi-channel mode: search in CHANNELS list
+    for ch in config.CHANNELS:
+        if ch["name"] == channel_name:
+            return ch
+    return None
+
+
+async def handle_message(message_text: str, channel_name: str):
     """
-    Handle ENTRY signal: open two trades and persist state.
+    Main message handler called from Telegram listener for each new message.
+
+    Args:
+        message_text: Raw message from Telegram
+        channel_name: Name of the channel this message came from
     """
-    logger.info(f"[MAIN] 🎯 Processing ENTRY signal {signal_id}")
+    try:
+        logger.info("=" * 80)
+        logger.info(f"[{channel_name}] 📥 Received: {message_text[:100]}{'...' if len(message_text) > 100 else ''}")
+
+        # Parse signal using channel-specific prompt
+        parsed = parse_signal(message_text, channel_name)
+
+        signal_type = parsed.get("type", "UNKNOWN")
+        logger.info(f"[{channel_name}] 🏷️  Signal type: {signal_type}")
+
+        # Route to appropriate handler
+        if signal_type == "ENTRY":
+            signal_id = datetime.now().strftime("%Y%m%d%H%M%S")
+            await handle_trade_entry(parsed, signal_id, channel_name)
+
+        elif signal_type == "PARTIAL":
+            await handle_partial_signal(parsed, channel_name)
+
+        elif signal_type == "CLOSE":
+            await handle_close_signal(parsed, channel_name)
+
+        elif signal_type == "SL_HIT":
+            await handle_sl_hit_signal(parsed, channel_name)
+
+        elif signal_type == "SL_MODIFY":
+            await handle_sl_modify_signal(parsed, channel_name)
+
+        elif signal_type == "IGNORE":
+            logger.debug(f"[{channel_name}] ⏭️ IGNORE - Skipping")
+        else:
+            logger.warning(f"[{channel_name}] ❓ Unknown signal type: {signal_type}")
+
+        logger.info("=" * 80)
+
+    except Exception as e:
+        logger.error(f"[{channel_name}] ❌ Unhandled exception in handle_message: {e}")
+        import traceback
+        logger.debug(f"[{channel_name}] Traceback: {traceback.format_exc()}")
+
+
+async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
+    """
+    Handle ENTRY signal: open multiple trades and persist state.
+
+    Args:
+        parsed: Parsed signal dictionary
+        signal_id: Unique signal identifier
+        channel_name: Channel identifier
+    """
+    logger.info(f"[{channel_name}] 🎯 Processing ENTRY signal {signal_id}")
 
     direction = parsed["direction"]
     entry_high = parsed["entry_high"]
@@ -51,237 +128,237 @@ async def handle_trade_entry(parsed: dict, signal_id: str):
 
     # Calculate entry price
     entry_price = calculate_entry_price(entry_high, entry_low)
-    logger.info(f"[MAIN] Entry price (midpoint): {entry_price:.2f}")
+    logger.info(f"[{channel_name}] Entry price (midpoint): {entry_price:.2f}")
 
-    # Calculate TPs
-    tp1 = None
-    tp2 = None
-
-    # Priority: explicit prices > pips
-    if parsed.get("tp1") is not None:
-        tp1 = parsed["tp1"]
-        logger.info(f"[MAIN] TP1 from price: {tp1:.2f}")
-    elif parsed.get("tp1_pips") is not None:
-        tp1 = calculate_tp_from_pips(direction, entry_price, parsed["tp1_pips"])
-        logger.info(f"[MAIN] TP1 from {parsed['tp1_pips']} pips: {tp1:.2f}")
-
-    if parsed.get("tp2") is not None:
-        tp2 = parsed["tp2"]
-        logger.info(f"[MAIN] TP2 from price: {tp2:.2f}")
-    elif parsed.get("tp2_pips") is not None:
-        tp2 = calculate_tp_from_pips(direction, entry_price, parsed["tp2_pips"])
-        logger.info(f"[MAIN] TP2 from {parsed['tp2_pips']} pips: {tp2:.2f}")
-
-    # Open two trades
-    ticket1, ticket2 = open_two_trades(direction, sl, tp1, tp2, signal_id)
-
-    if ticket1 == -1 or ticket2 == -1:
-        logger.error(f"[MAIN] ❌ Failed to open trades for signal {signal_id}")
+    # Get channel config for number of trades
+    channel_config = get_channel_config(channel_name)
+    if not channel_config:
+        logger.error(f"[{channel_name}] Channel config not found, aborting")
         return
 
-    # Persist to trades.json
+    trades_count = channel_config.get("trades_per_signal", 2)
+    if trades_count not in [2, 4]:
+        logger.warning(f"[{channel_name}] Unsupported trades_per_signal: {trades_count}, defaulting to 2")
+        trades_count = 2
+
+    # Build TP list based on trades_count, supporting both price and pips
+    tp_values = []
+    for i in range(1, trades_count + 1):
+        tp_price = parsed.get(f"tp{i}")
+        if tp_price is not None:
+            tp_values.append(float(tp_price))
+        else:
+            tp_pips = parsed.get(f"tp{i}_pips")
+            if tp_pips is not None:
+                tp = calculate_tp_from_pips(direction, entry_price, int(tp_pips))
+                tp_values.append(tp)
+            else:
+                tp_values.append(None)  # Missing TP
+
+    # If we have trailing None values and some earlier TPs, duplicate last non-None TP for missing ones
+    # This ensures we open the requested number of trades
+    if any(v is None for v in tp_values):
+        # Find last non-None value
+        last_valid = None
+        for v in tp_values:
+            if v is not None:
+                last_valid = v
+        if last_valid is not None:
+            tp_values = [v if v is not None else last_valid for v in tp_values]
+        else:
+            # All None -> no TPs provided, will open without TP (TP=0.0)
+            tp_values = [None] * trades_count
+
+    logger.info(f"[{channel_name}] TP values for {trades_count} trades: {tp_values}")
+
+    # Open multiple trades
+    tickets = open_multiple_trades(
+        direction=direction,
+        sl=sl,
+        tps=tp_values,
+        signal_id=signal_id,
+        channel_name=channel_name,
+        count=trades_count
+    )
+
+    if not tickets:
+        logger.error(f"[{channel_name}] ❌ Failed to open trades for signal {signal_id}")
+        return
+
+    # Persist to channel-specific trades file
     success = add_trade_group(
         signal_id=signal_id,
         direction=direction,
         entry_price=entry_price,
         sl=sl,
-        tp1=tp1,
-        tp2=tp2,
-        ticket1=ticket1,
-        ticket2=ticket2
+        tickets=tickets,
+        channel_name=channel_name
     )
 
     if success:
-        logger.info(f"[MAIN] ✅ ENTRY signal {signal_id} fully processed: {direction} @ {entry_price:.2f}, T1:{ticket1} T2:{ticket2}")
+        logger.info(f"[{channel_name}] ✅ ENTRY signal {signal_id} fully processed: {direction} @ {entry_price:.2f}, {len(tickets)} trades opened")
     else:
-        logger.error(f"[MAIN] ❌ ENTRY signal {signal_id} trades opened but failed to save state")
+        logger.error(f"[{channel_name}] ❌ ENTRY signal {signal_id} trades opened but failed to save state")
 
 
-async def handle_partial_signal(parsed: dict):
+async def handle_partial_signal(parsed: dict, channel_name: str):
     """
-    Handle PARTIAL signal: close T1, move T2 to breakeven.
-    """
-    logger.info("[MAIN] 🔄 Processing PARTIAL signal")
+    Handle PARTIAL signal: close half of open trades per group, move remaining to breakeven.
 
-    eligible_groups = get_partial_eligible_groups()
+    Args:
+        parsed: Parsed signal dictionary
+        channel_name: Channel identifier
+    """
+    logger.info(f"[{channel_name}] 🔄 Processing PARTIAL signal")
+
+    eligible_groups = get_partial_eligible_groups(channel_name)
 
     if not eligible_groups:
-        logger.warning("[MAIN] ⚠️ No eligible groups for partial close")
+        logger.warning(f"[{channel_name}] ⚠️ No eligible groups for partial close")
         return
 
-    logger.info(f"[MAIN] Processing {len(eligible_groups)} eligible group(s)")
+    logger.info(f"[{channel_name}] Processing {len(eligible_groups)} eligible group(s)")
 
     for group in eligible_groups:
         signal_id = group["signal_id"]
-        ticket1 = group["ticket1"]
-        ticket2 = group["ticket2"]
+        tickets = group.get("tickets", [])
+        closed_tickets = group.get("closed_tickets", [])
+        open_tickets = [t for t in tickets if t not in closed_tickets]
+
+        if not open_tickets:
+            logger.debug(f"[{channel_name}] Group {signal_id} has no open tickets, skipping")
+            continue
+
+        # Determine how many to close: close half (floor division) and move half to breakeven
+        close_count = len(open_tickets) // 2
+        # Ensure at least one closes if there's any open
+        if close_count == 0 and len(open_tickets) > 0:
+            close_count = 1
+        breakeven_count = len(open_tickets) - close_count
+
+        close_tickets = open_tickets[:close_count]
+        breakeven_tickets = open_tickets[close_count:]
+
+        logger.info(f"[{channel_name}] Group {signal_id}: closing {close_count} trades, moving {breakeven_count} to breakeven")
+
+        # Close selected tickets
+        for ticket in close_tickets:
+            if close_trade(ticket, signal_id):
+                mark_ticket_closed(signal_id, ticket, channel_name)
+            else:
+                logger.error(f"[{channel_name}] ❌ Failed to close ticket {ticket} for {signal_id}")
+
+        # Move remaining to breakeven
         entry_price = group["entry_price"]
+        for ticket in breakeven_tickets:
+            if not move_sl_to_breakeven(ticket, entry_price, signal_id):
+                logger.error(f"[{channel_name}] ❌ Failed to move ticket {ticket} to breakeven for {signal_id}")
 
-        # Close T1
-        if close_trade(ticket1, signal_id):
-            mark_t1_closed(signal_id)
-        else:
-            logger.error(f"[MAIN] ❌ Failed to close T1 for {signal_id}")
-
-        # Move T2 to breakeven
-        if move_sl_to_breakeven(ticket2, entry_price, signal_id):
-            # T2 still open, T1 closed → eligible status updated via mark_t1_closed
-            pass
-        else:
-            logger.error(f"[MAIN] ❌ Failed to move T2 to breakeven for {signal_id}")
+        # Mark partial applied
+        mark_partial_applied(signal_id, channel_name)
 
 
-async def handle_close_signal(parsed: dict):
+async def handle_close_signal(parsed: dict, channel_name: str):
     """
-    Handle CLOSE signal: close all remaining trades.
-    """
-    logger.info("[MAIN] 🔒 Processing CLOSE signal")
+    Handle CLOSE signal: close all remaining open trades.
 
-    open_groups = get_open_groups()
+    Args:
+        parsed: Parsed signal dictionary
+        channel_name: Channel identifier
+    """
+    logger.info(f"[{channel_name}] 🔒 Processing CLOSE signal")
+
+    open_groups = get_open_groups(channel_name)
 
     if not open_groups:
-        logger.warning("[MAIN] ⚠️ No open groups to close")
+        logger.warning(f"[{channel_name}] ⚠️ No open groups to close")
         return
 
-    logger.info(f"[MAIN] Closing {len(open_groups)} open group(s)")
+    logger.info(f"[{channel_name}] Closing {len(open_groups)} open group(s)")
 
     for group in open_groups:
         signal_id = group["signal_id"]
-        t1_closed = group.get("t1_closed", False)
-        t2_closed = group.get("t2_closed", False)
-        ticket1 = group.get("ticket1")
-        ticket2 = group.get("ticket2")
+        tickets = group.get("tickets", [])
+        closed_tickets = group.get("closed_tickets", [])
+        open_tickets = [t for t in tickets if t not in closed_tickets]
 
-        # Close T1 if still open
-        if not t1_closed and ticket1 is not None:
-            if close_trade(ticket1, signal_id):
-                mark_t1_closed(signal_id)
+        if not open_tickets:
+            logger.debug(f"[{channel_name}] Group {signal_id} has no open tickets")
+            continue
+
+        for ticket in open_tickets:
+            if close_trade(ticket, signal_id):
+                mark_ticket_closed(signal_id, ticket, channel_name)
             else:
-                logger.error(f"[MAIN] ❌ Failed to close T1 for {signal_id}")
-
-        # Close T2 if still open
-        if not t2_closed and ticket2 is not None:
-            if close_trade(ticket2, signal_id):
-                mark_t2_closed(signal_id)
-            else:
-                logger.error(f"[MAIN] ❌ Failed to close T2 for {signal_id}")
+                logger.error(f"[{channel_name}] ❌ Failed to close ticket {ticket} for {signal_id}")
 
 
-async def handle_sl_hit_signal(parsed: dict):
+async def handle_sl_hit_signal(parsed: dict, channel_name: str):
     """
     Handle SL_HIT signal: MT5 auto-closed via stop loss.
-    Mark all trades as closed in state.
-    """
-    logger.info("[MAIN] ⚠️ Processing SL_HIT signal (MT5 auto-close)")
+    Mark all open trades as closed in state.
 
-    open_groups = get_open_groups()
+    Args:
+        parsed: Parsed signal dictionary
+        channel_name: Channel identifier
+    """
+    logger.info(f"[{channel_name}] ⚠️ Processing SL_HIT signal (MT5 auto-close)")
+
+    open_groups = get_open_groups(channel_name)
 
     if not open_groups:
-        logger.warning("[MAIN] ⚠️ No open groups to mark as SL-hit")
+        logger.warning(f"[{channel_name}] ⚠️ No open groups to mark as SL-hit")
         return
 
-    logger.info(f"[MAIN] Marking {len(open_groups)} group(s) as closed (SL hit)")
+    logger.info(f"[{channel_name}] Marking {len(open_groups)} group(s) as closed (SL hit)")
 
     for group in open_groups:
         signal_id = group["signal_id"]
-        mark_both_closed(signal_id)
+        tickets = group.get("tickets", [])
+        closed_tickets = group.get("closed_tickets", [])
+        open_tickets = [t for t in tickets if t not in closed_tickets]
+
+        for ticket in open_tickets:
+            # MT5 already closed it, just mark in state
+            mark_ticket_closed(signal_id, ticket, channel_name)
 
 
-async def handle_sl_modify_signal(parsed: dict):
+async def handle_sl_modify_signal(parsed: dict, channel_name: str):
     """
     Handle SL_MODIFY signal: modify stop loss on open positions.
+
+    Args:
+        parsed: Parsed signal dictionary
+        channel_name: Channel identifier
     """
-    logger.info("[MAIN] 🔧 Processing SL_MODIFY signal")
+    logger.info(f"[{channel_name}] 🔧 Processing SL_MODIFY signal")
 
     new_sl = parsed["new_sl"]
-    open_groups = get_open_groups()
+    open_groups = get_open_groups(channel_name)
 
     if not open_groups:
-        logger.warning("[MAIN] ⚠️ No open groups to modify SL")
+        logger.warning(f"[{channel_name}] ⚠️ No open groups to modify SL")
         return
 
-    logger.info(f"[MAIN] Modifying SL to {new_sl:.2f} for {len(open_groups)} open group(s)")
+    logger.info(f"[{channel_name}] Modifying SL to {new_sl:.2f} for {len(open_groups)} open group(s)")
 
     success_count = 0
     for group in open_groups:
         signal_id = group["signal_id"]
-        ticket1 = group.get("ticket1")
-        ticket2 = group.get("ticket2")
+        tickets = group.get("tickets", [])
+        closed_tickets = group.get("closed_tickets", [])
+        open_tickets = [t for t in tickets if t not in closed_tickets]
 
-        # Modify SL for T1 if still open
-        if ticket1 is not None and not group.get("t1_closed", False):
-            if modify_sl(ticket1, new_sl, signal_id):
+        for ticket in open_tickets:
+            if modify_sl(ticket, new_sl, signal_id):
                 success_count += 1
             else:
-                logger.error(f"[MAIN] ❌ Failed to modify SL for T1 {ticket1}")
-
-        # Modify SL for T2 if still open
-        if ticket2 is not None and not group.get("t2_closed", False):
-            if modify_sl(ticket2, new_sl, signal_id):
-                success_count += 1
-            else:
-                logger.error(f"[MAIN] ❌ Failed to modify SL for T2 {ticket2}")
+                logger.error(f"[{channel_name}] ❌ Failed to modify SL for ticket {ticket}")
 
     if success_count > 0:
-        logger.info(f"[MAIN] ✅ SL_MODIFY: Modified {success_count} position(s) to {new_sl:.2f}")
+        logger.info(f"[{channel_name}] ✅ SL_MODIFY: Modified {success_count} position(s) to {new_sl:.2f}")
     else:
-        logger.warning("[MAIN] ⚠️ No positions were modified")
-
-
-async def handle_ignore_signal(parsed: dict):
-    """Handle IGNORE signal: do nothing."""
-    logger.debug("[MAIN] ⏭️ IGNORE - Skipping")
-
-
-async def handle_message(message_text: str):
-    """
-    Main message handler called from Telegram listener for each new message.
-
-    Flow:
-    1. Parse signal via Groq
-    2. Route to appropriate handler based on type
-    3. Log outcomes with ✅/❌ emojis
-    4. Never raise exception (catch all to keep listener alive)
-    """
-    try:
-        logger.info("=" * 80)
-        logger.info(f"[MAIN] 📥 Received message: {message_text[:100]}{'...' if len(message_text) > 100 else ''}")
-
-        # Parse signal
-        parsed = parse_signal(message_text)
-
-        signal_type = parsed.get("type", "UNKNOWN")
-        logger.info(f"[MAIN] 🏷️  Signal type: {signal_type}")
-
-        # Route to handler
-        if signal_type == "ENTRY":
-            signal_id = datetime.now().strftime("%Y%m%d%H%M%S")
-            await handle_trade_entry(parsed, signal_id)
-
-        elif signal_type == "PARTIAL":
-            await handle_partial_signal(parsed)
-
-        elif signal_type == "CLOSE":
-            await handle_close_signal(parsed)
-
-        elif signal_type == "SL_HIT":
-            await handle_sl_hit_signal(parsed)
-
-        elif signal_type == "SL_MODIFY":
-            await handle_sl_modify_signal(parsed)
-
-        elif signal_type == "IGNORE":
-            await handle_ignore_signal(parsed)
-
-        else:
-            logger.warning(f"[MAIN] ❓ Unknown signal type: {signal_type}")
-
-        logger.info("=" * 80)
-
-    except Exception as e:
-        logger.error(f"[MAIN] ❌ Unhandled exception in handle_message: {e}")
-        import traceback
-        logger.debug(f"[MAIN] Traceback: {traceback.format_exc()}")
+        logger.warning(f"[{channel_name}] ⚠️ No positions were modified")
 
 
 async def main():
@@ -289,25 +366,31 @@ async def main():
     Main async orchestrator.
 
     1. Connect to MT5 (abort if fails)
-    2. Load existing trades state
-    3. Start Telegram listener (blocking)
+    2. Load existing trades state for all channels
+    3. Start multi-channel Telegram listener (blocking)
     4. Handle shutdown gracefully
     """
-    logger.info("[MAIN] 🚀 Starting GaryBot...")
+    logger.info("[MAIN] 🚀 Starting GaryBot Multi-Channel...")
 
     # Check config placeholders
     if isinstance(config.TELEGRAM_API_ID, str) and "YOUR_" in config.TELEGRAM_API_ID:
         logger.warning("[MAIN] ⚠️ Config placeholders detected! Fill in config.py with your credentials.")
+        return 1
 
     # Connect to MT5
     if not connect_mt5():
         logger.critical("[MAIN] ❌ Cannot start: MT5 connection failed")
         return 1
 
-    # Load existing trades state
-    trades = load_trades()
-    open_count = len([t for t in trades if not t.get("t2_closed", False)])
-    logger.info(f"[MAIN] Loaded {len(trades)} trade groups ({open_count} open)")
+    # Load existing trades state for all channels (just for logging)
+    from trade_manager import get_all_channels_trades
+    all_trades = get_all_channels_trades()
+    total_open = 0
+    for ch_name, trades in all_trades.items():
+        open_count = len([t for t in trades if len(t.get("closed_tickets", [])) < len(t.get("tickets", []))])
+        total_open += open_count
+        logger.info(f"[MAIN] Channel '{ch_name}': {len(trades)} groups ({open_count} open)")
+    logger.info(f"[MAIN] Total open groups across all channels: {total_open}")
 
     # Set up signal handler for graceful shutdown
     stop_event = asyncio.Event()
@@ -321,13 +404,13 @@ async def main():
 
     # Start Telegram listener with auto-reconnect on PersistentTimestampOutdatedError
     max_reconnect_attempts = 3
-    reconnect_delay = 5  # seconds
+    timestamp_reconnect_delay = 10  # seconds for timestamp errors
     listener_task = None
 
     try:
         for attempt in range(max_reconnect_attempts):
-            logger.info(f"[MAIN] Starting Telegram listener (attempt {attempt + 1}/{max_reconnect_attempts})")
-            listener_task = asyncio.create_task(start_listener(handle_message))
+            logger.info(f"[MAIN] Starting multi-channel listener (attempt {attempt + 1}/{max_reconnect_attempts})")
+            listener_task = asyncio.create_task(start_multi_listener(handle_message))
 
             # Wait for stop event or listener task completion
             stop_wait_task = asyncio.create_task(stop_event.wait())
@@ -344,26 +427,22 @@ async def main():
             # Check if listener task completed with an error
             if listener_task in done:
                 try:
-                    # This will raise the exception if the task failed
                     await listener_task
-                    # If we get here, the listener exited normally (unlikely)
                     logger.info("[MAIN] Listener exited normally")
                     break
                 except PersistentTimestampOutdatedError as e:
                     logger.warning(f"[MAIN] Persistent timestamp error: {e}")
                     if attempt < max_reconnect_attempts - 1:
-                        logger.info(f"[MAIN] Reconnecting in {reconnect_delay} seconds...")
-                        await asyncio.sleep(reconnect_delay)
+                        logger.info(f"[MAIN] Reconnecting in {timestamp_reconnect_delay} seconds...")
+                        await asyncio.sleep(timestamp_reconnect_delay)
                         continue
                     else:
-                        logger.error("[MAIN] Max reconnection attempts reached")
+                        logger.error("[MAIN] Max reconnection attempts reached for timestamp errors")
                         raise
                 except asyncio.CancelledError:
-                    # Listener was cancelled, exit quietly
                     break
                 except Exception as e:
                     logger.error(f"[MAIN] Listener failed with unexpected error: {e}")
-                    # For other errors, don't retry automatically
                     raise
 
             # Cancel remaining tasks

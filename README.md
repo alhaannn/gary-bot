@@ -1,20 +1,37 @@
-# GaryBot - Automated Gold Trading Bot
+# GaryBot - Multi-Channel Automated Gold Trading Bot
 
-A fully automated trading bot that monitors Telegram channel [@Gary_TheTrader](https://t.me/Gary_TheTrader) for gold trading signals and executes trades automatically on MetaTrader5.
+A fully automated trading bot that monitors multiple Telegram channels for gold trading signals and executes trades automatically on MetaTrader5.
+
+**Features:**
+- 📺 **Multi-channel support** - Monitor multiple signal providers simultaneously
+- 🤖 **AI-powered classification** - Groq Llama 3.3 70B understands each channel's unique style
+- 🔄 **Auto-adaptive prompts** - Fetch and analyze channel history to generate perfect prompts
+- 🧪 **Universal testing channel** - Test new configurations with `@traderalhan`
+- 💾 **Per-channel state** - Isolated trade tracking per channel
+- ⚙️ **Flexible trade counts** - Supports 2 or 4 trades per signal based on channel config
 
 ## Features
 
-- **Real-time Telegram monitoring** using Telethon
+### Core Functionality
+- **Real-time Telegram monitoring** using Telethon across multiple channels
 - **AI-powered signal classification** via Groq API (Llama 3.3 70B)
+- **Channel-specific prompts** - Each trader's unique signal style is learned and adapted to
 - **Automatic trade execution** on MetaTrader5
-- **Dual-trade strategy** (T1 + T2 with separate take-profits)
-- **Persistent state** - survives bot restarts via trades.json
-- **Partial close management** - close T1, move T2 to breakeven
-- **Full position management** - complete close on signal
-- **Stop-loss handling** - automatic tracking of SL hits
-- **Position stacking** - opens new trades regardless of existing positions
-- **Robust error handling** - never crashes on single message errors
-- **Comprehensive logging** - console + file with emoji indicators
+- **Flexible trade strategy** - Supports 2 or 4 trades per signal (configurable per channel)
+- **Persistent state** - Survives bot restarts via per-channel `trades_{channel}.json` files
+- **Partial close management** - Close T1, move T2 to breakeven
+- **Full position management** - Complete close on signal
+- **Stop-loss handling** - Automatic tracking of SL hits and SL modifications
+- **Position stacking** - Opens new trades regardless of existing positions
+- **Robust error handling** - Never crashes on message parsing errors
+- **Comprehensive logging** - Console + file with emoji indicators and per-channel context
+
+### Advanced Features
+- **Auto-reconnect** - Handles Telegram timestamp desync issues automatically
+- **Message validation** - Rejects stale/future messages to prevent duplicate execution
+- **Multi-channel orchestration** - Isolated processing per channel with unified trade logic
+- **Dynamic prompt generation** - Analyze channel history to create optimal prompts (via `fetch_history.py`)
+- **Universal testing channel** - `@traderalhan` combines patterns from all channels for testing
 
 ## Project Structure
 
@@ -23,14 +40,27 @@ gary-bot/
 ├── config.py              # Your credentials (DO NOT COMMIT)
 ├── config.example.py      # Template for config.py
 ├── logger.py              # Logging configuration
-├── signal_parser.py       # Groq API signal classification
-├── trade_manager.py       # Persistent trade state management
+├── signal_parser.py       # Groq API signal classification (multi-channel)
+├── trade_manager.py       # Persistent trade state management (per-channel)
 ├── trade_executor.py      # MetaTrader5 integration
-├── telegram_listener.py   # Telegram async listener
+├── telegram_listener.py   # Telegram async multi-channel listener
 ├── main.py                # Main orchestrator
+├── fetch_history.py       # Analyzer: fetch messages + generate prompts
+├── run_analyzer.py        # Standalone analyzer (legacy/alternative)
 ├── requirements.txt       # Python dependencies
 ├── .gitignore             # Git ignore rules
-├── trades.json            # Created at runtime - trade state
+├── prompts/               # Channel-specific AI prompts (auto-generated)
+│   ├── gary.txt
+│   ├── goldtradersunny.txt
+│   ├── bengoldtrader.txt
+│   ├── gtmofx.txt
+│   └── traderalhan.txt    # Universal testing channel prompt
+├── history/               # Fetched historical messages (analysis output)
+│   ├── gary_messages.json
+│   ├── goldtradersunny_messages.json
+│   └── ... (per channel)
+├── trades_{channel}.json  # Created at runtime - trade state per channel
+├── gary_bot_session.session # Telegram session (auto-created)
 └── gary_bot.log           # Created at runtime - debug logs
 ```
 
@@ -84,23 +114,79 @@ pip install -r requirements.txt
 
    **Important:** Never commit `config.py` to git. It's already in `.gitignore`.
 
-### 4. Customize for Your Channel/Trader (Optional)
+### 4. Configure Channels (Multi-Channel Setup)
 
-The bot is pre-configured for **@Gary_TheTrader** with specific signal formats. To use with a different Telegram channel:
+GaryBot supports monitoring **multiple signal channels** simultaneously, each with isolated trade state and custom AI prompts.
 
-1. **Change the channel name** in `config.py`:
-   ```python
-   TELEGRAM_CHANNEL = "YourTraderName"  # Without @
-   ```
+#### Channel Configuration
 
-2. **Adapt the signal parser** in `signal_parser.py`:
-   - Update the `SYSTEM_PROMPT` with your trader's exact signal formats
-   - Add examples of ENTRY, PARTIAL, CLOSE, SL_MODIFY messages
-   - The AI will learn to recognize their specific format
+Edit `config.py` to add/remove channels in the `CHANNELS` list:
 
-3. **Test the parser** by sending sample messages and checking the logs.
+```python
+CHANNELS = [
+    {
+        "name": "gary",              # Internal identifier (lowercase, no spaces)
+        "username": "Gary_TheTrader", # Telegram channel username (with or without @)
+        "enabled": True,              # Set False to disable temporarily
+        "trades_per_signal": 2,       # Number of trades per signal (2 or 4)
+        "prompt_file": "prompts/gary.txt"  # Path to channel-specific prompt
+    },
+    {
+        "name": "goldtradersunny",
+        "username": "goldtradersunny",
+        "enabled": True,
+        "trades_per_signal": 4,       # This channel opens 4 trades
+        "prompt_file": "prompts/goldtradersunny.txt"
+    },
+    # Add more channels as needed...
+]
+```
 
-The default configuration works for Gary's signal style as documented in this README.
+**Important:**
+
+- Each channel must have unique `name` and corresponding prompt file
+- The bot will create separate state files: `trades_{channel_name}.json`
+- Channel-specific prompts live in `prompts/{name}.txt`
+
+#### Universal Testing Channel
+
+A special testing channel `traderalhan` is pre-configured. Its prompt (`prompts/traderalhan.txt`) combines signal patterns from **all** channels, making it ideal for testing new signal types or validating parser behavior. You can send test signals in any format and the bot should recognize them correctly.
+
+**To use:** Join `@traderalhan` on Telegram and send test messages; the bot will process them using the universal classifier.
+
+#### Legacy Single-Channel Mode
+
+For backward compatibility, set `USE_LEGACY_SINGLE_CHANNEL = True` and define `LEGACY_CHANNEL`. This mode uses:
+- Single state file `trades.json`
+- Single prompt `prompts/gary.txt`
+- No per-channel isolation
+
+### 5. Generate/Update Channel Prompts Automatically
+
+Each channel has a unique signal style (different formatting, keywords, emoji usage, etc.). Use **`fetch_history.py`** to automatically:
+
+1. Fetch recent messages (default 2000) from each enabled channel
+2. Analyze signal patterns, keywords, and structures
+3. Generate/update the channel-specific prompt files in `prompts/`
+
+```bash
+python fetch_history.py
+```
+
+This will overwrite existing prompt files with updated versions based on the latest message history. Run this whenever you notice a channel's signal style has changed, or when adding a new channel.
+
+**Configuration:**
+
+- `HISTORY_LIMIT` (in `config.py`): Number of messages to fetch per channel (default 2000)
+- `HISTORY_OUTPUT_DIR`: Where raw fetched messages are saved for reference (default `history/`)
+
+**Note:** The script **skips** the `traderalhan` testing channel (since it's a composite, not a real trader).
+
+#### Alternative: Standalone Analyzer
+
+`run_analyzer.py` is the original analyzer with a different approach. It fetches 200 messages and generates prompts. Use `fetch_history.py` for the enhanced version with customizable limits.
+
+### 6. Verify MT5 Installation
 
 ### 4. Verify MT5 Installation
 
@@ -187,7 +273,18 @@ On SL_HIT signal (e.g., "This setup hit SL. Wait for recovery"):
 
 ## State Management
 
-All open trades are persisted to `trades.json`:
+### Multi-Channel State
+
+In multi-channel mode (default), each channel has its own state file:
+
+- `trades_gary.json`
+- `trades_goldtradersunny.json`
+- `trades_bengoldtrader.json`
+- etc.
+
+This keeps each channel's trades completely isolated, preventing cross-channel interference. The bot loads state for all channels on startup and maintains each independently.
+
+**State file format** (per channel):
 
 ```json
 [
@@ -198,16 +295,28 @@ All open trades are persisted to `trades.json`:
     "sl": 4471.0,
     "tp1": 4486.0,
     "tp2": 4491.0,
-    "ticket1": 123456,
-    "ticket2": 123457,
-    "t1_closed": false,
-    "t2_closed": false,
+    "tickets": [123456, 123457],  // List of all trade tickets
+    "closed_tickets": [123456],   // Which tickets are closed
+    "partial_applied": false,     // Whether partial close was done
     "created_at": "2025-03-25T06:40:12.123456"
   }
 ]
 ```
 
-This allows the bot to recover from restarts without losing track of positions.
+### Legacy Single-Channel Mode
+
+If `USE_LEGACY_SINGLE_CHANNEL = True`, the original single file `trades.json` is used (backward compatible).
+
+### State Recovery
+
+On startup, the bot automatically:
+1. Loads trade state for all channels from their respective JSON files
+2. Logs the number of open groups per channel
+3. Continues managing those positions normally (partials, closes, etc.)
+
+This ensures bot restarts or crashes never lose track of open trades.
+
+## Logging
 
 ## Logging
 
@@ -226,15 +335,74 @@ Logs are written to both console and `gary_bot.log`:
 
 ## Configuration Options
 
+### Core Settings
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SYMBOL` | "XAUUSD" | Gold symbol (check your broker) |
+| `SYMBOL` | "XAUUSD" | Gold symbol (check your broker: could be XAUUSD or XAUUSDm) |
 | `LOT_SIZE` | 0.01 | Lots per trade |
-| `MAGIC_NUMBER` | 20250101 | Bot identifier for trades |
+| `MAGIC_NUMBER` | 20250101 | Bot identifier for trades (unique across bots) |
 | `SLIPPAGE` | 10 | Max slippage in points |
-| `TRADE_DELAY` | 0.2 | Delay between T1 and T2 (seconds) |
-| `GROQ_MODEL` | "llama-3.3-70b-versatile" | LLM model |
+| `TRADE_DELAY` | 0.2 | Delay between T1 and T2 opening (seconds) |
+| `GROQ_MODEL` | "llama-3.3-70b-versatile" | LLM model for signal classification |
 | `GROQ_TIMEOUT` | 10 | API timeout in seconds |
+| `TIMESTAMP_THRESHOLD` | 5 | Reject messages older/newer than this many seconds |
+
+### Multi-Channel Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `USE_LEGACY_SINGLE_CHANNEL` | False | Set True to use old single-channel mode |
+| `LEGACY_CHANNEL` | "Gary_TheTrader" | Channel username when legacy mode is True |
+| `CHANNELS` | `[...]` | List of channel configurations (see above) |
+| `HISTORY_LIMIT` | 2000 | Messages to fetch per channel when running `fetch_history.py` |
+| `HISTORY_OUTPUT_DIR` | "history" | Directory for raw fetched messages |
+
+## Analysis & Prompt Generation Tools
+
+GaryBot includes powerful tools to automatically understand each channel's signal style and generate optimal prompts.
+
+### `fetch_history.py` (Recommended)
+
+The flagship tool that combines message fetching, pattern analysis, and prompt generation.
+
+**What it does:**
+1. Fetches up to `HISTORY_LIMIT` (default 2000) messages from each enabled channel (skips `traderalhan`)
+2. Analyzes message patterns to identify:
+   - Direction keywords (BUY/SELL indicators)
+   - Entry formats (@ price ranges, etc.)
+   - SL/TP formats (price vs pips, labeling styles)
+   - Symbol mentions
+   - Representative signal examples
+3. Saves raw messages to `history/{channel}_messages.json` (for reference)
+4. Generates/updates channel-specific prompts in `prompts/{channel}.txt` with:
+   - Customized signal descriptions based on actual observed formats
+   - Real examples from that channel (top 3 extracted)
+   - Tailored parsing rules and keywords
+
+**Usage:**
+```bash
+python fetch_history.py
+```
+
+**When to run:**
+- After adding a new channel to `CHANNELS`
+- When a channel changes its signal format/style
+- Periodically to keep prompts up-to-date
+- Before starting the bot for the first time with a new channel
+
+**Customization:**
+Edit `config.py` to adjust:
+- `HISTORY_LIMIT`: Number of messages to analyze (more = better understanding but slower)
+- `HISTORY_OUTPUT_DIR`: Where to save raw JSON messages
+
+### `run_analyzer.py` (Legacy)
+
+The original standalone analyzer. Similar functionality but with fixed 200-message limit and different output format. Kept for compatibility.
+
+```bash
+python run_analyzer.py
+```
 
 ## Troubleshooting
 

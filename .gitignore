@@ -45,10 +45,14 @@ Thumbs.db
 
 # Project specific
 trades.json
+trades_*.json
 gary_bot.log
-gary_bot.session
+*.session
 config.py
 instructions.md
+
+# Fetched historical messages (analysis output)
+history/
 
 # Claude Code
 .claude/

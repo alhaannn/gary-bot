@@ -2,12 +2,12 @@
 MetaTrader5 Trade Executor
 
 Handles all MT5 operations: connection, price queries, order placement,
-position closing, and stop-loss modification.
+position closing, and stop-loss modification. Supports variable trade counts.
 """
 
 import time
 import logging
-from typing import Optional, Tuple
+from typing import Optional, List, Tuple
 from datetime import datetime
 
 import MetaTrader5 as mt5
@@ -163,53 +163,85 @@ def open_trade(
         return -1
 
 
-def open_two_trades(
+def open_multiple_trades(
     direction: str,
     sl: float,
-    tp1: Optional[float],
-    tp2: Optional[float],
-    signal_id: str
-) -> Tuple[int, int]:
+    tps: List[Optional[float]],
+    signal_id: str,
+    channel_name: str,
+    count: int = 2
+) -> List[int]:
     """
-    Open two trades (T1 and T2) with the same parameters but different TP.
-    T1 opens first, then after 200ms delay T2 opens.
+    Open multiple trades (N) with the same parameters but different TP levels.
+    Attempts to open all trades; if any fails, closes all previously opened and returns empty list.
+
+    Args:
+        direction: "BUY" or "SELL"
+        sl: Stop loss price
+        tps: List of take profit prices (length may be less than count)
+        signal_id: Unique signal identifier
+        channel_name: Channel identifier (for comment prefix)
+        count: Number of trades to open (2 or 4)
 
     Returns:
-        (ticket1, ticket2) - both -1 if either fails
+        List of ticket numbers (all successful) or empty list on failure
     """
-    logger.info(f"[MT5] [{signal_id}] Opening two trades: {direction} SL={sl:.2f} TP1={tp1} TP2={tp2}")
+    if count <= 0:
+        logger.error(f"[MT5] [{signal_id}] Invalid trade count: {count}")
+        return []
 
-    # Open T1
-    ticket1 = open_trade(
-        direction=direction,
-        sl=sl,
-        tp=tp1,
-        comment=f"Gary_T1_{signal_id}",
-        signal_id=signal_id
-    )
+    logger.info(f"[MT5] [{signal_id}] Opening {count} trades for {channel_name}: {direction} SL={sl:.2f}")
 
-    if ticket1 == -1:
-        logger.error(f"[MT5] [{signal_id}] Failed to open T1, aborting T2")
-        return -1, -1
+    tickets = []
+    try:
+        for i in range(count):
+            # Determine TP for this trade
+            if i < len(tps):
+                tp = tps[i]
+            elif len(tps) > 0:
+                tp = tps[-1]  # Use last available TP
+            else:
+                tp = None
 
-    # Delay before T2
-    time.sleep(0.2)
+            # Generate comment with trade index
+            comment = f"{channel_name[:8]}_T{i+1}_{signal_id}"[:32]
 
-    # Open T2
-    ticket2 = open_trade(
-        direction=direction,
-        sl=sl,
-        tp=tp2,
-        comment=f"Gary_T2_{signal_id}",
-        signal_id=signal_id
-    )
+            ticket = open_trade(
+                direction=direction,
+                sl=sl,
+                tp=tp,
+                comment=comment,
+                signal_id=signal_id
+            )
 
-    if ticket2 == -1:
-        logger.error(f"[MT5] [{signal_id}] T1 opened successfully but T2 failed")
-        # T1 remains open, trade_group will still be added
-        # User may want to manually close T1 or let it run
+            if ticket == -1:
+                logger.error(f"[MT5] [{signal_id}] Failed to open trade {i+1}/{count}, rolling back...")
+                # Close any already opened trades
+                for t in tickets:
+                    try:
+                        close_trade(t, signal_id)
+                    except:
+                        pass
+                return []
 
-    return ticket1, ticket2
+            tickets.append(ticket)
+
+            # Delay between trades except after last one
+            if i < count - 1:
+                time.sleep(0.2)
+
+        logger.info(f"[MT5] [{signal_id}] ✅ Successfully opened {len(tickets)} trades: {tickets}")
+        return tickets
+
+    except Exception as e:
+        logger.error(f"[MT5] [{signal_id}] Exception during multiple trade opening: {e}")
+        # Cleanup any opened trades
+        for t in tickets:
+            try:
+                close_trade(t, signal_id)
+            except:
+                pass
+        return []
 
 
 def close_trade(ticket: int, signal_id: str = "") -> bool:
