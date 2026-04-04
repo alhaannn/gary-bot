@@ -120,8 +120,8 @@ async def start_multi_listener(message_handler_callback):
                     """Factory that returns an async handler with captured name."""
                     async def on_new_message(event):
                         try:
-                            # DEBUG: Always log that event fired
-                            logger.debug(f"[{name}] 🔄 Event fired! Message ID: {event.message.id if event.message else 'None'}")
+                            # DEBUG: Always log that event fired (use INFO to show on console)
+                            logger.info(f"[{name}] 🔄 EVENT FIRED! Message ID: {event.message.id if event.message else 'None'}")
 
                             # Timestamp validation first
                             message = event.message
