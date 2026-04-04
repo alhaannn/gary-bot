@@ -46,7 +46,8 @@ def is_message_timestamp_valid(message, threshold_seconds: int = TIMESTAMP_THRES
     diff = abs((now - msg_date).total_seconds())
 
     if diff > threshold_seconds:
-        logger.debug(f"[TELEGRAM] Dropping outdated message: age={diff:.1f}s (> {threshold_seconds}s)")
+        logger.debug(f"[TELEGRAM] ⏰ Dropping outdated message: age={diff:.1f}s (> {threshold_seconds}s)")
+        logger.debug(f"[TELEGRAM] ⏰ Message date: {msg_date}, Now: {now}")
         return False
 
     return True
@@ -119,20 +120,35 @@ async def start_multi_listener(message_handler_callback):
                     """Factory that returns an async handler with captured name."""
                     async def on_new_message(event):
                         try:
+                            # DEBUG: Always log that event fired
+                            logger.debug(f"[{name}] 🔄 Event fired! Message ID: {event.message.id if event.message else 'None'}")
+
                             # Timestamp validation first
                             message = event.message
+                            if not message:
+                                logger.debug(f"[{name}] ❌ No message object")
+                                return
+
+                            # Check timestamp
                             if not is_message_timestamp_valid(message, TIMESTAMP_THRESHOLD):
+                                now = datetime.now(timezone.utc)
+                                msg_date = message.date
+                                if msg_date.tzinfo is None:
+                                    msg_date = msg_date.replace(tzinfo=timezone.utc)
+                                diff = abs((now - msg_date).total_seconds())
+                                logger.warning(f"[{name}] ⏰ Message timestamp validation FAILED: age={diff:.1f}s, threshold={TIMESTAMP_THRESHOLD}s")
+                                logger.warning(f"[{name}] ⏰ Message date: {msg_date}, Now: {now}")
                                 return
 
                             # Extract text
                             message_text = message.message
                             if message_text is None:
-                                logger.debug(f"[{name}] Skipping media-only/empty message")
+                                logger.debug(f"[{name}] Skipping media-only/empty message (no text)")
                                 return
 
                             message_text = message_text.strip()
                             if not message_text:
-                                logger.debug(f"[{name}] Skipping empty message")
+                                logger.debug(f"[{name}] Skipping empty/whitespace-only message")
                                 return
 
                             logger.info(f"[{name}] 📨 New message: {message_text[:80]}{'...' if len(message_text) > 80 else ''}")
@@ -141,6 +157,8 @@ async def start_multi_listener(message_handler_callback):
                             asyncio.create_task(message_handler_callback(message_text, name))
                         except Exception as e:
                             logger.error(f"[{name}] Error in message handler: {e}")
+                            import traceback
+                            logger.debug(f"[{name}] Traceback: {traceback.format_exc()}")
                     return on_new_message
 
                 handler = make_handler(channel_name)
