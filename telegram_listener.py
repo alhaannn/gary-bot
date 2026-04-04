@@ -113,13 +113,10 @@ async def start_multi_listener(message_handler_callback):
                 channel_entity = await client.get_entity(channel_config["username"])
                 channel_name = channel_config["name"]
 
-                # Create handler with bound channel_name using closure
-                @client.on(events.NewMessage(
-                    chats=channel_entity,
-                    incoming=True,
-                    func=lambda e: e.message
-                ))
-                async def make_handler(ch_name):
+                # Create a handler with bound channel_name using closure
+                # Important: we must create the handler function and then register it
+                def make_handler(name):
+                    """Factory that returns an async handler with captured name."""
                     async def on_new_message(event):
                         try:
                             # Timestamp validation first
@@ -130,23 +127,28 @@ async def start_multi_listener(message_handler_callback):
                             # Extract text
                             message_text = message.message
                             if message_text is None:
-                                logger.debug(f"[{ch_name}] Skipping media-only/empty message")
+                                logger.debug(f"[{name}] Skipping media-only/empty message")
                                 return
 
                             message_text = message_text.strip()
                             if not message_text:
-                                logger.debug(f"[{ch_name}] Skipping empty message")
+                                logger.debug(f"[{name}] Skipping empty message")
                                 return
 
-                            logger.info(f"[{ch_name}] 📨 New message: {message_text[:80]}{'...' if len(message_text) > 80 else ''}")
+                            logger.info(f"[{name}] 📨 New message: {message_text[:80]}{'...' if len(message_text) > 80 else ''}")
 
                             # Call main handler with channel context
-                            asyncio.create_task(message_handler_callback(message_text, ch_name))
+                            asyncio.create_task(message_handler_callback(message_text, name))
                         except Exception as e:
-                            logger.error(f"[{ch_name}] Error in message handler: {e}")
+                            logger.error(f"[{name}] Error in message handler: {e}")
                     return on_new_message
 
                 handler = make_handler(channel_name)
+                client.on(events.NewMessage(
+                    chats=channel_entity,
+                    incoming=True,
+                    func=lambda e: e.message
+                ))(handler)
                 channel_handlers.append((channel_name, handler))
                 logger.info(f"[TELEGRAM] ✅ Registered handler for channel: {channel_name} ({channel_config['username']})")
             except Exception as e:
