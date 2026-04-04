@@ -113,6 +113,7 @@ async def start_multi_listener(message_handler_callback):
             try:
                 channel_entity = await client.get_entity(channel_config["username"])
                 channel_name = channel_config["name"]
+                logger.info(f"[TELEGRAM] Resolved channel: {channel_name} -> entity ID: {channel_entity.id}, title: {channel_entity.title}")
 
                 # Create a handler with bound channel_name using closure
                 # Important: we must create the handler function and then register it
