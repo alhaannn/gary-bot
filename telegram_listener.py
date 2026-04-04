@@ -115,14 +115,14 @@ async def start_multi_listener(message_handler_callback):
                 channel_name = channel_config["name"]
                 logger.info(f"[TELEGRAM] Resolved channel: {channel_name} -> entity ID: {channel_entity.id}, title: {channel_entity.title}")
 
-                # Create a handler with bound channel_name using closure
-                # Important: we must create the handler function and then register it
-                def make_handler(name):
-                    """Factory that returns an async handler with captured name."""
+                # Create a handler with bound channel_name and entity
+                def make_handler(name, entity):
+                    """Factory that returns an async handler with captured name and entity."""
                     async def on_new_message(event):
                         try:
                             # DEBUG: Always log that event fired (use INFO to show on console)
                             logger.info(f"[{name}] 🔄 EVENT FIRED! Message ID: {event.message.id if event.message else 'None'}")
+                            logger.debug(f"[{name}] Event details: chat_id={event.chat_id}, message_id={event.message.id if event.message else 'None'}")
 
                             # Timestamp validation first
                             message = event.message
@@ -162,12 +162,12 @@ async def start_multi_listener(message_handler_callback):
                             logger.debug(f"[{name}] Traceback: {traceback.format_exc()}")
                     return on_new_message
 
-                handler = make_handler(channel_name)
-                client.on(events.NewMessage(
-                    chats=channel_entity,
-                    incoming=True,
-                    func=lambda e: e.message
-                ))(handler)
+                handler = make_handler(channel_name, channel_entity)
+                # Register handler - filter by entity's ID to ensure we only get messages from that channel
+                client.add_event_handler(handler, events.NewMessage(
+                    func=lambda e: e.message and e.chat_id == channel_entity.id,
+                    incoming=True
+                ))
                 channel_handlers.append((channel_name, handler))
                 logger.info(f"[TELEGRAM] ✅ Registered handler for channel: {channel_name} ({channel_config['username']})")
             except Exception as e:
