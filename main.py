@@ -326,6 +326,7 @@ async def handle_sl_hit_signal(parsed: dict, channel_name: str):
 async def handle_sl_modify_signal(parsed: dict, channel_name: str):
     """
     Handle SL_MODIFY signal: modify stop loss on open positions.
+    Supports both absolute price (new_sl) and pips-based (new_sl_pips).
 
     Args:
         parsed: Parsed signal dictionary
@@ -333,14 +334,18 @@ async def handle_sl_modify_signal(parsed: dict, channel_name: str):
     """
     logger.info(f"[{channel_name}] 🔧 Processing SL_MODIFY signal")
 
-    new_sl = parsed["new_sl"]
+    new_sl_abs = parsed.get("new_sl")  # May be None if using pips
+    new_sl_pips = parsed.get("new_sl_pips")  # May be None if using absolute
+
+    if new_sl_abs is None and new_sl_pips is None:
+        logger.warning(f"[{channel_name}] ⚠️ SL_MODIFY: no valid SL value provided")
+        return
+
     open_groups = get_open_groups(channel_name)
 
     if not open_groups:
         logger.warning(f"[{channel_name}] ⚠️ No open groups to modify SL")
         return
-
-    logger.info(f"[{channel_name}] Modifying SL to {new_sl:.2f} for {len(open_groups)} open group(s)")
 
     success_count = 0
     for group in open_groups:
@@ -349,14 +354,27 @@ async def handle_sl_modify_signal(parsed: dict, channel_name: str):
         closed_tickets = group.get("closed_tickets", [])
         open_tickets = [t for t in tickets if t not in closed_tickets]
 
+        # Compute new_sl for this group if using pips
+        group_new_sl = new_sl_abs
+        if new_sl_pips is not None:
+            direction = group["direction"]
+            entry_price = group["entry_price"]
+            # Convert pips to price: XAUUSD: 1 pip = 0.1
+            pips_price = new_sl_pips * config.PIP_MULTIPLIER
+            if direction == "BUY":
+                group_new_sl = entry_price - pips_price
+            else:  # SELL
+                group_new_sl = entry_price + pips_price
+            logger.debug(f"[{channel_name}] Computed SL from {new_sl_pips} pips: {group_new_sl:.2f} (entry={entry_price}, dir={direction})")
+
         for ticket in open_tickets:
-            if modify_sl(ticket, new_sl, signal_id):
+            if modify_sl(ticket, group_new_sl, signal_id):
                 success_count += 1
             else:
                 logger.error(f"[{channel_name}] ❌ Failed to modify SL for ticket {ticket}")
 
     if success_count > 0:
-        logger.info(f"[{channel_name}] ✅ SL_MODIFY: Modified {success_count} position(s) to {new_sl:.2f}")
+        logger.info(f"[{channel_name}] ✅ SL_MODIFY: Modified {success_count} position(s) to {group_new_sl:.2f}")
     else:
         logger.warning(f"[{channel_name}] ⚠️ No positions were modified")
 

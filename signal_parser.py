@@ -182,23 +182,46 @@ def parse_signal(message_text: str, channel_name: str = "gary") -> Dict[str, Any
         # Validate SL_MODIFY response
         elif parsed.get("type") == "SL_MODIFY":
             new_sl = parsed.get("new_sl")
+            new_sl_pips = parsed.get("new_sl_pips")
 
-            if new_sl is None:
-                logger.warning(f"[PARSER] [{channel_name}] SL_MODIFY missing new_sl field")
+            # Accept either absolute price OR pips distance
+            if new_sl is None and new_sl_pips is None:
+                logger.warning(f"[PARSER] [{channel_name}] SL_MODIFY missing both new_sl and new_sl_pips")
                 return {"type": "IGNORE"}
 
-            try:
-                new_sl = float(new_sl)
-                # Validate price is in XAUUSD range (4000-5000)
-                if not (4000 <= new_sl <= 5000):
-                    logger.warning(f"[PARSER] [{channel_name}] SL_MODIFY new_sl out of range: {new_sl}")
-                    return {"type": "IGNORE"}
+            # Validate absolute price if provided
+            if new_sl is not None:
+                try:
+                    new_sl = float(new_sl)
+                    # Validate price is in XAUUSD range (4000-5000)
+                    if not (4000 <= new_sl <= 5000):
+                        logger.warning(f"[PARSER] [{channel_name}] SL_MODIFY new_sl out of range: {new_sl}, ignoring it")
+                        new_sl = None  # Ignore but maybe pips is valid
+                except (TypeError, ValueError):
+                    logger.warning(f"[PARSER] [{channel_name}] SL_MODIFY new_sl is not a valid number, ignoring")
+                    new_sl = None
                 parsed["new_sl"] = new_sl
-            except (TypeError, ValueError):
-                logger.warning(f"[PARSER] [{channel_name}] SL_MODIFY new_sl is not a valid number")
+
+            # Validate pips if provided
+            if new_sl_pips is not None:
+                try:
+                    new_sl_pips = int(new_sl_pips)
+                    parsed["new_sl_pips"] = new_sl_pips
+                except (TypeError, ValueError):
+                    logger.warning(f"[PARSER] [{channel_name}] SL_MODIFY new_sl_pips is not a valid integer, ignoring")
+                    new_sl_pips = None
+                    parsed["new_sl_pips"] = None
+
+            # If both are None after validation, reject
+            if new_sl is None and new_sl_pips is None:
+                logger.warning(f"[PARSER] [{channel_name}] SL_MODIFY: no valid SL value")
                 return {"type": "IGNORE"}
 
-            logger.info(f"[PARSER] [{channel_name}] SL_MODIFY details: new SL = {new_sl:.2f}")
+            # Log what we're using
+            if new_sl is not None:
+                logger.info(f"[PARSER] [{channel_name}] SL_MODIFY details: new SL = {new_sl:.2f} (absolute price)")
+            if new_sl_pips is not None:
+                logger.info(f"[PARSER] [{channel_name}] SL_MODIFY details: new SL = {new_sl_pips} pips")
 
         return parsed
 

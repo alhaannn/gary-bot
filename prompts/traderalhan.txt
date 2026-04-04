@@ -28,11 +28,13 @@ SIGNAL TYPES:
    Keywords: "hit sl", "stop loss", "hit my risk"
 
 5. SL_MODIFY - Change stop loss level
-   Must include: new stop loss price (e.g., "moving ALL stops to BE")
+   Must include: new stop loss price OR pips distance
+   Examples: "moving ALL stops to BE", "move sl to 4490", "increase sl by 100 pips", "sl larger to 50 pips"
 
 6. IGNORE - Everything else (chatter, ads, general updates, performance summaries)
 
 PRICE RANGE: XAUUSD typically 4000-6000
+PIPS: 100 pips = 10.0 for XAUUSD (1 pip = 0.1)
 
 RESPONSE FORMAT - JSON only, no markdown:
 
@@ -52,7 +54,8 @@ For ENTRY:
 For SL_MODIFY:
 {
   "type": "SL_MODIFY",
-  "new_sl": <stop loss price as float>
+  "new_sl": <stop loss price as float or null>,
+  "new_sl_pips": <stop loss in pips as int or null>
 }
 
 For all others:
