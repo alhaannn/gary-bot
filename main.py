@@ -28,7 +28,7 @@ logger = get_logger()
 # Import other modules
 from signal_parser import parse_signal
 from trade_manager import (
-    load_trades, add_trade_group,
+    load_trades, add_trade_group, save_trades,
     get_open_groups, get_partial_eligible_groups,
     mark_ticket_closed, mark_partial_applied
 )
@@ -39,6 +39,7 @@ from trade_executor import (
 )
 from telegram_listener import start_multi_listener
 from telethon.errors import PersistentTimestampOutdatedError
+import MetaTrader5 as mt5
 
 
 def get_channel_config(channel_name: str) -> Optional[Dict]:
@@ -171,6 +172,17 @@ async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
 
     logger.info(f"[{channel_name}] TP values for {trades_count} trades: {tp_values}")
 
+    # Extract TP1 and TP2 for auto management (first two non-None TPs)
+    tp1 = None
+    tp2 = None
+    for val in tp_values:
+        if val is not None:
+            if tp1 is None:
+                tp1 = float(val)
+            elif tp2 is None:
+                tp2 = float(val)
+                break
+
     # Open multiple trades
     tickets = open_multiple_trades(
         direction=direction,
@@ -185,14 +197,16 @@ async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
         logger.error(f"[{channel_name}] ❌ Failed to open trades for signal {signal_id}")
         return
 
-    # Persist to channel-specific trades file
+    # Persist to channel-specific trades file, including TP levels for auto management
     success = add_trade_group(
         signal_id=signal_id,
         direction=direction,
         entry_price=entry_price,
         sl=sl,
         tickets=tickets,
-        channel_name=channel_name
+        channel_name=channel_name,
+        tp1=tp1,
+        tp2=tp2
     )
 
     if success:
@@ -379,6 +393,131 @@ async def handle_sl_modify_signal(parsed: dict, channel_name: str):
         logger.warning(f"[{channel_name}] ⚠️ No positions were modified")
 
 
+# ========== Automatic TP Management ==========
+async def tp_monitor():
+    """
+    Background task that monitors open positions for TP1/TP2 levels.
+    Requires AUTO_TP_MANAGEMENT = True in config.
+    """
+    logger.info("[TP Monitor] ✅ Started")
+    while True:
+        try:
+            await asyncio.sleep(getattr(config, 'TP_MONITOR_INTERVAL', 5))
+
+            # Ensure MT5 is connected; if not, skip this cycle
+            if not mt5.initialize(login=config.MT5_LOGIN, password=config.MT5_PASSWORD, server=config.MT5_SERVER):
+                logger.error("[TP Monitor] MT5 not initialized, skipping...")
+                continue
+
+            tick = mt5.symbol_info_tick(config.SYMBOL)
+            if not tick:
+                logger.debug("[TP Monitor] No tick data for symbol")
+                continue
+
+            bid = tick.bid
+            ask = tick.ask
+
+            # Determine channels to monitor
+            if config.USE_LEGACY_SINGLE_CHANNEL:
+                channels_to_monitor = [{"name": "gary"}]
+            else:
+                channels_to_monitor = [c for c in config.CHANNELS if c["enabled"]]
+
+            for ch in channels_to_monitor:
+                ch_name = ch["name"]
+                open_groups = get_open_groups(ch_name)
+                for group in open_groups:
+                    signal_id = group["signal_id"]
+                    tp1 = group.get("tp1")
+                    tp2 = group.get("tp2")
+                    if tp1 is None or tp2 is None:
+                        continue  # this group not set up for auto TP
+
+                    direction = group["direction"]
+                    partial_applied = group.get("partial_applied", False)
+
+                    # Check TP1 hit
+                    if not partial_applied:
+                        if (direction == "BUY" and bid >= tp1) or (direction == "SELL" and ask <= tp1):
+                            logger.info(f"[TP Monitor] {ch_name} {signal_id}: TP1 reached ({tp1}) - applying partial close")
+
+                            # Load fresh state
+                            trades = load_trades(ch_name)
+                            target_group = None
+                            for g in trades:
+                                if g["signal_id"] == signal_id:
+                                    target_group = g
+                                    break
+                            if not target_group:
+                                continue
+
+                            all_tickets = target_group.get("tickets", [])
+                            closed_tickets = target_group.get("closed_tickets", [])
+                            open_tickets = [t for t in all_tickets if t not in closed_tickets]
+
+                            if not open_tickets:
+                                continue
+
+                            # Determine how many to close: half (at least 1)
+                            close_count = len(open_tickets) // 2
+                            if close_count == 0 and len(open_tickets) > 0:
+                                close_count = 1
+                            to_close = open_tickets[:close_count]
+                            to_be = open_tickets[close_count:]
+
+                            # Close selected tickets
+                            for ticket in to_close:
+                                if close_trade(ticket, signal_id):
+                                    mark_ticket_closed(signal_id, ticket, ch_name)
+                                else:
+                                    logger.error(f"[TP Monitor] Failed to close ticket {ticket}")
+
+                            # Move remaining to breakeven
+                            entry_price = target_group["entry_price"]
+                            for ticket in to_be:
+                                if not move_sl_to_breakeven(ticket, entry_price, signal_id):
+                                    logger.error(f"[TP Monitor] Failed to move ticket {ticket} to BE")
+
+                            # Mark partial applied
+                            target_group["partial_applied"] = True
+                            save_trades(trades, ch_name)
+                            logger.info(f"[TP Monitor] {ch_name} {signal_id}: Partial complete (closed {len(to_close)}, moved {len(to_be)} to BE)")
+                            # After partial, skip TP2 for this group in this cycle
+                            continue
+
+                    # Check TP2 hit (full close)
+                    if (direction == "BUY" and bid >= tp2) or (direction == "SELL" and ask <= tp2):
+                        logger.info(f"[TP Monitor] {ch_name} {signal_id}: TP2 reached ({tp2}) - closing all remaining")
+
+                        trades = load_trades(ch_name)
+                        target_group = None
+                        for g in trades:
+                            if g["signal_id"] == signal_id:
+                                target_group = g
+                                break
+                        if not target_group:
+                            continue
+
+                        all_tickets = target_group.get("tickets", [])
+                        closed_tickets = target_group.get("closed_tickets", [])
+                        open_tickets = [t for t in all_tickets if t not in closed_tickets]
+
+                        if not open_tickets:
+                            continue
+
+                        # Close all open tickets
+                        for ticket in open_tickets:
+                            if close_trade(ticket, signal_id):
+                                mark_ticket_closed(signal_id, ticket, ch_name)
+                            else:
+                                logger.error(f"[TP Monitor] Failed to close ticket {ticket}")
+
+                        logger.info(f"[TP Monitor] {ch_name} {signal_id}: Full close complete ({len(open_tickets)} tickets closed)")
+
+        except Exception as e:
+            logger.error(f"[TP Monitor] Unexpected error: {e}", exc_info=True)
+
+
 async def main():
     """
     Main async orchestrator.
@@ -409,6 +548,11 @@ async def main():
         total_open += open_count
         logger.info(f"[MAIN] Channel '{ch_name}': {len(trades)} groups ({open_count} open)")
     logger.info(f"[MAIN] Total open groups across all channels: {total_open}")
+
+    # Start TP monitor if enabled (use getattr for backward compatibility)
+    if getattr(config, 'AUTO_TP_MANAGEMENT', False):
+        asyncio.create_task(tp_monitor())
+        logger.info("[MAIN] TP Monitor task started")
 
     # Set up signal handler for graceful shutdown
     stop_event = asyncio.Event()

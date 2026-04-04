@@ -358,6 +358,26 @@ Logs are written to both console and `gary_bot.log`:
 | `HISTORY_LIMIT` | 2000 | Messages to fetch per channel when running `fetch_history.py` |
 | `HISTORY_OUTPUT_DIR` | "history" | Directory for raw fetched messages |
 
+### Automatic TP Management
+
+The bot can automatically monitor open positions and trigger partial/full closes when price reaches predefined TP levels, without needing manual Telegram signals.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTO_TP_MANAGEMENT` | False | Set True to enable automatic TP monitoring |
+| `TP_MONITOR_INTERVAL` | 5 | Check interval in seconds (how often to scan positions) |
+
+**How it works:**
+- When a trade group is opened, the TP1 and TP2 levels are stored in the state.
+- If `AUTO_TP_MANAGEMENT=True`, a background task periodically checks the current market price against TP1/TP2.
+- **At TP1**: Closes half of the open trades in the group and moves the remaining half to breakeven.
+- **At TP2**: Closes all remaining trades in the group.
+- This works for any number of trades per signal (2, 4, etc.).
+- The logic is identical to the manual `PARTIAL` and `CLOSE` signals, just triggered automatically.
+- You can still send manual signals; they will work alongside auto monitoring (auto respects already-applied partials).
+
+**Important:** You must have TP1 and TP2 defined in the signal (either as absolute prices or pips). The bot captures these when the ENTRY signal is processed.
+
 ## Analysis & Prompt Generation Tools
 
 GaryBot includes powerful tools to automatically understand each channel's signal style and generate optimal prompts.

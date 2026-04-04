@@ -142,7 +142,9 @@ def add_trade_group(
     entry_price: float,
     sl: float,
     tickets: List[int],
-    channel_name: str = "gary"
+    channel_name: str = "gary",
+    tp1: Optional[float] = None,
+    tp2: Optional[float] = None
 ) -> bool:
     """
     Add a new trade group to the state for a specific channel.
@@ -155,6 +157,8 @@ def add_trade_group(
         sl: Stop loss price
         tickets: List of ticket numbers opened for this signal
         channel_name: Channel identifier
+        tp1: First take profit level (optional, for auto TP management)
+        tp2: Second take profit level (optional, for auto TP management)
 
     Returns:
         True if successful, False otherwise
@@ -170,13 +174,15 @@ def add_trade_group(
         "closed_tickets": [],  # Subset of tickets that have been closed
         "partial_applied": False,  # Whether partial close logic has been applied
         "channel": channel_name,
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now().isoformat(),
+        "tp1": round(tp1, 2) if tp1 is not None else None,
+        "tp2": round(tp2, 2) if tp2 is not None else None
     }
 
     trades.append(trade_group)
 
     if save_trades(trades, channel_name):
-        logger.info(f"[TRADE] ✅ Added trade group {signal_id} for {channel_name}: {direction} tickets {tickets}")
+        logger.info(f"[TRADE] ✅ Added trade group {signal_id} for {channel_name}: {direction} tickets {tickets} TP1={tp1} TP2={tp2}")
         return True
     return False
 
