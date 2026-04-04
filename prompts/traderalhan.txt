@@ -94,4 +94,10 @@ From gtmofx:
 - What a entryyyy again!!!🤑🤑 IN LESS THEN 60 SECONDS AGAIN!!  TP1✅ TP2✅✅
 - Gold sell now 4626 - 4629  SL: 4633  TP: 4624 TP: 4622 TP: 4620 TP: open
 
+Additional SL_MODIFY examples:
+- "move sl to breakeven" → {"type": "SL_MODIFY", "new_sl": "BE"} (or compute BE)
+- "increase sl by 50 pips" → {"type": "SL_MODIFY", "new_sl_pips": 50}
+- "sl larger to 100 pips" → {"type": "SL_MODIFY", "new_sl_pips": 100}
+- "adjust stop loss to 4490" → {"type": "SL_MODIFY", "new_sl": 4490.0}
+
 Analyze the message and return only the JSON.
