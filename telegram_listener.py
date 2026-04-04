@@ -178,6 +178,14 @@ async def start_multi_listener(message_handler_callback):
             return
 
         logger.info("[TELEGRAM] ✅ Listening on all channels... (press Ctrl+C to stop)")
+
+        # DEBUG: Add a global catch-all to see if ANY messages are coming through
+        @client.on(events.NewMessage(incoming=True))
+        async def global_debug_handler(event):
+            if event.message and event.message.text:
+                logger.warning(f"[DEBUG] 💀 GLOBAL HANDLER caught message from chat_id={event.chat_id}: {event.message.text[:50]}...")
+        logger.info("[DEBUG] Global debug handler registered to catch ALL incoming messages")
+
         await client.run_until_disconnected()
 
     except PhoneNumberInvalidError:
