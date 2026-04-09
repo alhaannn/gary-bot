@@ -183,14 +183,16 @@ async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
                 tp2 = float(val)
                 break
 
-    # Open multiple trades
+    # Open multiple trades (smart routing: market or pending)
     tickets = open_multiple_trades(
         direction=direction,
         sl=sl,
         tps=tp_values,
         signal_id=signal_id,
         channel_name=channel_name,
-        count=trades_count
+        count=trades_count,
+        entry_high=entry_high,
+        entry_low=entry_low
     )
 
     if not tickets:
@@ -564,14 +566,17 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Start Telegram listener with auto-reconnect on PersistentTimestampOutdatedError
-    max_reconnect_attempts = 3
-    timestamp_reconnect_delay = 10  # seconds for timestamp errors
+    # Start Telegram listener
+    # Note: telegram_listener.py now handles PersistentTimestampOutdatedError
+    # reconnection internally with exponential backoff and session cleanup.
+    # This outer loop is a safety net for truly unexpected failures only.
+    max_outer_retries = 3
+    outer_retry_delay = 30  # seconds
     listener_task = None
 
     try:
-        for attempt in range(max_reconnect_attempts):
-            logger.info(f"[MAIN] Starting multi-channel listener (attempt {attempt + 1}/{max_reconnect_attempts})")
+        for attempt in range(max_outer_retries):
+            logger.info(f"[MAIN] Starting multi-channel listener (attempt {attempt + 1}/{max_outer_retries})")
             listener_task = asyncio.create_task(start_multi_listener(handle_message))
 
             # Wait for stop event or listener task completion
@@ -593,18 +598,23 @@ async def main():
                     logger.info("[MAIN] Listener exited normally")
                     break
                 except PersistentTimestampOutdatedError as e:
-                    logger.warning(f"[MAIN] Persistent timestamp error: {e}")
-                    if attempt < max_reconnect_attempts - 1:
-                        logger.info(f"[MAIN] Reconnecting in {timestamp_reconnect_delay} seconds...")
-                        await asyncio.sleep(timestamp_reconnect_delay)
+                    # This should rarely reach here since telegram_listener handles it internally
+                    logger.warning(f"[MAIN] Persistent timestamp error escaped to main: {e}")
+                    if attempt < max_outer_retries - 1:
+                        logger.info(f"[MAIN] Outer retry in {outer_retry_delay}s...")
+                        await asyncio.sleep(outer_retry_delay)
                         continue
                     else:
-                        logger.error("[MAIN] Max reconnection attempts reached for timestamp errors")
+                        logger.error("[MAIN] Max outer retry attempts reached")
                         raise
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
                     logger.error(f"[MAIN] Listener failed with unexpected error: {e}")
+                    if attempt < max_outer_retries - 1:
+                        logger.info(f"[MAIN] Outer retry in {outer_retry_delay}s...")
+                        await asyncio.sleep(outer_retry_delay)
+                        continue
                     raise
 
             # Cancel remaining tasks

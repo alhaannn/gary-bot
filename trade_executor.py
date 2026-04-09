@@ -16,7 +16,7 @@ from logger import get_logger
 from config import (
     MT5_LOGIN, MT5_PASSWORD, MT5_SERVER,
     SYMBOL, LOT_SIZE, MAGIC_NUMBER, SLIPPAGE,
-    ENTRY_PRICE_PRECISION, PIP_MULTIPLIER
+    ENTRY_PRICE_PRECISION, PIP_MULTIPLIER, ENTRY_ZONE_TOLERANCE
 )
 
 logger = get_logger()
@@ -145,7 +145,7 @@ def open_trade(
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
 
-        logger.info(f"[MT5] [{signal_id}] Opening {direction} {LOT_SIZE} lot @ {price:.2f}, SL:{sl:.2f}, TP:{tp if tp else 'None'}")
+        logger.info(f"[MT5] [{signal_id}] Opening MARKET {direction} {LOT_SIZE} lot @ {price:.2f}, SL:{sl:.2f}, TP:{tp if tp else 'None'}")
 
         # Send order
         result = mt5.order_send(request)
@@ -155,11 +155,100 @@ def open_trade(
             return -1
 
         ticket = result.order
-        logger.info(f"[MT5] [{signal_id}] ✅ Trade opened successfully - Ticket: {ticket}")
+        logger.info(f"[MT5] [{signal_id}] ✅ Market trade opened - Ticket: {ticket}")
         return ticket
 
     except Exception as e:
         logger.error(f"[MT5] [{signal_id}] Exception opening trade: {e}")
+        return -1
+
+
+def open_pending_order(
+    direction: str,
+    entry_price: float,
+    sl: float,
+    tp: Optional[float],
+    comment: str,
+    signal_id: str
+) -> int:
+    """
+    Open a pending order (Buy Limit, Buy Stop, Sell Limit, Sell Stop).
+
+    The order type is determined by comparing the desired entry price
+    to the current market price:
+      - BUY + market > entry  → Buy Limit  (price needs to come down)
+      - BUY + market < entry  → Buy Stop   (price needs to go up)
+      - SELL + market < entry → Sell Limit  (price needs to come up)
+      - SELL + market > entry → Sell Stop   (price needs to go down)
+
+    Args:
+        direction: "BUY" or "SELL"
+        entry_price: Desired entry price
+        sl: Stop loss price
+        tp: Take profit price (or None)
+        comment: Trade comment (max 32 chars)
+        signal_id: Signal ID for logging
+
+    Returns:
+        Order ticket (int) on success, -1 on failure
+    """
+    try:
+        # Get current market price to decide pending type
+        market_price = get_current_price(direction)
+        if market_price is None:
+            logger.error(f"[MT5] [{signal_id}] Cannot place pending order: no price available")
+            return -1
+
+        # Determine pending order type
+        if direction.upper() == "BUY":
+            if market_price > entry_price:
+                order_type = mt5.ORDER_TYPE_BUY_LIMIT
+                order_type_name = "BUY LIMIT"
+            else:
+                order_type = mt5.ORDER_TYPE_BUY_STOP
+                order_type_name = "BUY STOP"
+        else:  # SELL
+            if market_price < entry_price:
+                order_type = mt5.ORDER_TYPE_SELL_LIMIT
+                order_type_name = "SELL LIMIT"
+            else:
+                order_type = mt5.ORDER_TYPE_SELL_STOP
+                order_type_name = "SELL STOP"
+
+        # Prepare pending order request
+        request = {
+            "action": mt5.TRADE_ACTION_PENDING,
+            "symbol": SYMBOL,
+            "volume": LOT_SIZE,
+            "type": order_type,
+            "price": round(float(entry_price), ENTRY_PRICE_PRECISION),
+            "sl": float(sl),
+            "tp": float(tp) if tp is not None else 0.0,
+            "deviation": SLIPPAGE,
+            "magic": MAGIC_NUMBER,
+            "comment": comment[:32],
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_RETURN,
+        }
+
+        logger.info(
+            f"[MT5] [{signal_id}] Placing PENDING {order_type_name} {LOT_SIZE} lot "
+            f"@ {entry_price:.2f} (market: {market_price:.2f}), SL:{sl:.2f}, TP:{tp if tp else 'None'}"
+        )
+
+        # Send order
+        result = mt5.order_send(request)
+
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            logger.error(f"[MT5] [{signal_id}] Pending order failed: {result.comment} (code {result.retcode})")
+            return -1
+
+        ticket = result.order
+        logger.info(f"[MT5] [{signal_id}] ✅ Pending {order_type_name} placed - Ticket: {ticket}")
+        return ticket
+
+    except Exception as e:
+        logger.error(f"[MT5] [{signal_id}] Exception placing pending order: {e}")
         return -1
 
 
@@ -169,11 +258,18 @@ def open_multiple_trades(
     tps: List[Optional[float]],
     signal_id: str,
     channel_name: str,
-    count: int = 2
+    count: int = 2,
+    entry_high: Optional[float] = None,
+    entry_low: Optional[float] = None
 ) -> List[int]:
     """
-    Open multiple trades (N) with the same parameters but different TP levels.
-    Attempts to open all trades; if any fails, closes all previously opened and returns empty list.
+    Open multiple trades (N) with smart order routing.
+
+    If entry_high/entry_low are provided, checks current market price:
+    - Market price WITHIN entry zone → Market order (instant fill)
+    - Market price OUTSIDE entry zone → Pending order (limit/stop)
+
+    If entry_high/entry_low are not provided, falls back to market order.
 
     Args:
         direction: "BUY" or "SELL"
@@ -182,6 +278,8 @@ def open_multiple_trades(
         signal_id: Unique signal identifier
         channel_name: Channel identifier (for comment prefix)
         count: Number of trades to open (2 or 4)
+        entry_high: Upper bound of entry zone (optional)
+        entry_low: Lower bound of entry zone (optional)
 
     Returns:
         List of ticket numbers (all successful) or empty list on failure
@@ -190,7 +288,46 @@ def open_multiple_trades(
         logger.error(f"[MT5] [{signal_id}] Invalid trade count: {count}")
         return []
 
-    logger.info(f"[MT5] [{signal_id}] Opening {count} trades for {channel_name}: {direction} SL={sl:.2f}")
+    # Determine order mode: market or pending
+    use_pending = False
+    pending_entry_price = None
+
+    if entry_high is not None and entry_low is not None:
+        market_price = get_current_price(direction)
+        if market_price is not None:
+            # Calculate distance from entry zone edges
+            if market_price < entry_low:
+                distance_from_zone = entry_low - market_price
+                nearest_edge = entry_low
+            elif market_price > entry_high:
+                distance_from_zone = market_price - entry_high
+                nearest_edge = entry_high
+            else:
+                distance_from_zone = 0  # Inside the zone
+                nearest_edge = None
+
+            if distance_from_zone <= ENTRY_ZONE_TOLERANCE:
+                # Market price is within zone OR close enough — use market order
+                logger.info(
+                    f"[MT5] [{signal_id}] Market price {market_price:.2f} is "
+                    f"{'WITHIN' if distance_from_zone == 0 else f'{distance_from_zone:.2f}pts from'} "
+                    f"entry zone [{entry_low:.2f} - {entry_high:.2f}] → MARKET ORDER"
+                )
+                use_pending = False
+            else:
+                # Market is too far from zone — use pending order at nearest edge
+                pending_entry_price = round(nearest_edge, ENTRY_PRICE_PRECISION)
+                logger.info(
+                    f"[MT5] [{signal_id}] Market price {market_price:.2f} is {distance_from_zone:.2f}pts from "
+                    f"entry zone [{entry_low:.2f} - {entry_high:.2f}] (>{ENTRY_ZONE_TOLERANCE}pts) "
+                    f"→ PENDING ORDER @ {pending_entry_price:.2f}"
+                )
+                use_pending = True
+        else:
+            logger.warning(f"[MT5] [{signal_id}] Cannot get market price, falling back to market order")
+
+    order_mode = "PENDING" if use_pending else "MARKET"
+    logger.info(f"[MT5] [{signal_id}] Opening {count} {order_mode} trades for {channel_name}: {direction} SL={sl:.2f}")
 
     tickets = []
     try:
@@ -206,20 +343,33 @@ def open_multiple_trades(
             # Generate comment with trade index
             comment = f"{channel_name[:8]}_T{i+1}_{signal_id}"[:32]
 
-            ticket = open_trade(
-                direction=direction,
-                sl=sl,
-                tp=tp,
-                comment=comment,
-                signal_id=signal_id
-            )
+            if use_pending and pending_entry_price is not None:
+                ticket = open_pending_order(
+                    direction=direction,
+                    entry_price=pending_entry_price,
+                    sl=sl,
+                    tp=tp,
+                    comment=comment,
+                    signal_id=signal_id
+                )
+            else:
+                ticket = open_trade(
+                    direction=direction,
+                    sl=sl,
+                    tp=tp,
+                    comment=comment,
+                    signal_id=signal_id
+                )
 
             if ticket == -1:
                 logger.error(f"[MT5] [{signal_id}] Failed to open trade {i+1}/{count}, rolling back...")
-                # Close any already opened trades
+                # Close any already opened trades (market orders) or cancel pending
                 for t in tickets:
                     try:
-                        close_trade(t, signal_id)
+                        if use_pending:
+                            cancel_pending_order(t, signal_id)
+                        else:
+                            close_trade(t, signal_id)
                     except:
                         pass
                 return []
@@ -230,7 +380,7 @@ def open_multiple_trades(
             if i < count - 1:
                 time.sleep(0.2)
 
-        logger.info(f"[MT5] [{signal_id}] ✅ Successfully opened {len(tickets)} trades: {tickets}")
+        logger.info(f"[MT5] [{signal_id}] ✅ Successfully opened {len(tickets)} {order_mode} trades: {tickets}")
         return tickets
 
     except Exception as e:
@@ -238,7 +388,10 @@ def open_multiple_trades(
         # Cleanup any opened trades
         for t in tickets:
             try:
-                close_trade(t, signal_id)
+                if use_pending:
+                    cancel_pending_order(t, signal_id)
+                else:
+                    close_trade(t, signal_id)
             except:
                 pass
         return []
@@ -395,6 +548,39 @@ def modify_sl(ticket: int, new_sl: float, signal_id: str = "") -> bool:
 
     except Exception as e:
         logger.error(f"[MT5] [{signal_id}] Exception modifying SL: {e}")
+        return False
+
+
+def cancel_pending_order(ticket: int, signal_id: str = "") -> bool:
+    """
+    Cancel a pending order by ticket.
+
+    Args:
+        ticket: Order ticket to cancel
+        signal_id: Optional signal ID for logging
+
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        request = {
+            "action": mt5.TRADE_ACTION_REMOVE,
+            "order": ticket,
+            "comment": f"Cancel_{signal_id}"[:32],
+        }
+
+        logger.info(f"[MT5] [{signal_id}] Cancelling pending order: {ticket}")
+        result = mt5.order_send(request)
+
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            logger.error(f"[MT5] [{signal_id}] Cancel failed: {result.comment} (code {result.retcode})")
+            return False
+
+        logger.info(f"[MT5] [{signal_id}] ✅ Pending order {ticket} cancelled")
+        return True
+
+    except Exception as e:
+        logger.error(f"[MT5] [{signal_id}] Exception cancelling order: {e}")
         return False
 
 

@@ -6,22 +6,28 @@ SIGNAL TYPES:
 
 1. ENTRY - New trade entry with direction, entry zone, stop loss, and take profit(s)
 
-   Observed formats from this channel:
-   Example 1: **VIP setup → 2 minutes // +200 pips.**  Let that sink in.  2 minutes… and the move was done.  No time to think. No second entry.
-   Example 2: **FREE setup   +300 pips to start the day.**  A powerful opening.  But if you’ve been here long enough, you already know…
-   Example 3: Let’s GOOO  @wallstreetben
-
-   Key elements detected:
+   Key elements:
    - Direction: BUY, SELL
    - Entry: @ PRICE or RANGE
    - Stop Loss: SL: XXX
-   - Take Profit: PIPS
+   - Take Profit: PIPS or price
+   - Example: "Gold Buy now @ 3050 - 3055  SL: 3040  TP: 100/200Pips"
 
 2. PARTIAL - Close partial position, secure profits, move remainder to breakeven
-   Keywords: "close some", "secure profit", "take half", "partial", "book some"
+   Keywords: "close some", "secure profit", "take half", "partial", "book some",
+             "close and secure", "set breakeven", "TP1", "close our trade now and set breakeven"
 
-3. CLOSE - Close all remaining positions
-   Keywords: "close all", "exit all", "take profit", "full close"
+   CRITICAL: Ben's TP1-hit messages are PARTIAL signals, NOT CLOSE signals.
+   When Ben says something like:
+   - "STRAIGHT TO TP1//50pips✓ Let's CLOSE our trade now and set breakeven if you wish to hold now"
+   - "TP1//100pips✅ Let's CLOSE our trade now and set breakeven if you wish to hold now"
+   - "TOUCH AND TP1//200pips again✅ Let's CLOSE our trade now and set breakeven"
+   These mean: close HALF the positions (TP1 hit), keep the rest running with breakeven.
+   This is PARTIAL, not CLOSE.
+
+3. CLOSE - Close ALL remaining positions (final exit, no "set breakeven" mentioned)
+   Keywords: "close all", "exit all", "full close", "close everything"
+   NOTE: If the message mentions "set breakeven" or "hold now", it is PARTIAL, not CLOSE.
 
 4. SL_HIT - Stop loss hit
    Keywords: "hit sl", "stop loss", "hit my risk"
@@ -29,7 +35,7 @@ SIGNAL TYPES:
 5. SL_MODIFY - Change stop loss level
    Must include: new stop loss price
 
-6. IGNORE - Everything else (chatter, ads, updates)
+6. IGNORE - Everything else (chatter, ads, updates, performance summaries)
 
 PRICE RANGE: XAUUSD typically 4000-6000
 
@@ -65,10 +71,16 @@ PARSING RULES:
 - When uncertain → IGNORE
 - Reject incomplete signals (missing direction, entry, or SL)
 
-EXAMPLES FROM THIS CHANNEL:
+CLASSIFICATION EXAMPLES FROM THIS CHANNEL:
 
-   Example 1: **VIP setup → 2 minutes // +200 pips.**  Let that sink in.  2 minutes… and the move was done.  No time to think. No second entry.
-   Example 2: **FREE setup   +300 pips to start the day.**  A powerful opening.  But if you’ve been here long enough, you already know…
-   Example 3: Let’s GOOO  @wallstreetben
+PARTIAL examples (TP1 hit + breakeven):
+- "FREE SETUP- STRAIGHT TO TP1//50pips✓ Let's CLOSE our trade now and set breakeven if you wish to hold now!!" → PARTIAL
+- "Round 4 of the day STRAIGHT TO TP2//100pips✅ Let's CLOSE our trade now and set breakeven if you wish to hold now‼️" → PARTIAL
+- "Round 3 TOUCH AND TP1//200pips again✅ Let's CLOSE our trade now and set breakeven if you wish to hold now‼️" → PARTIAL
+
+IGNORE examples:
+- "Nonstop smashing TP with Ben🫡" → IGNORE
+- "VIP setup → 2 minutes // +200 pips. Let that sink in." → IGNORE
+- "Let's GOOO @wallstreetben" → IGNORE
 
 Analyze the message and return only the JSON.

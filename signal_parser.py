@@ -148,10 +148,21 @@ def parse_signal(message_text: str, channel_name: str = "gary") -> Dict[str, Any
                 logger.warning(f"[PARSER] [{channel_name}] Invalid price values in ENTRY response")
                 return {"type": "IGNORE"}
 
-            # Ensure entry_high > entry_low
-            if entry_high <= entry_low:
-                logger.warning(f"[PARSER] [{channel_name}] entry_high must be > entry_low")
-                return {"type": "IGNORE"}
+            # Handle entry_high / entry_low relationship
+            if entry_high < entry_low:
+                # LLM got them backwards — swap
+                logger.debug(f"[PARSER] [{channel_name}] Swapping entry_high/entry_low: {entry_high} <-> {entry_low}")
+                entry_high, entry_low = entry_low, entry_high
+
+            if entry_high == entry_low:
+                # Single price given — add ±1 spread to create entry zone
+                logger.info(f"[PARSER] [{channel_name}] Single entry price {entry_high}, adding ±1 spread")
+                entry_high = entry_high + 1.0
+                entry_low = entry_low - 1.0
+
+            # Update parsed dict with corrected values
+            parsed["entry_high"] = entry_high
+            parsed["entry_low"] = entry_low
 
             # Validate TP fields (at least one must be present)
             tp1 = parsed.get("tp1")
