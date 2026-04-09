@@ -7,13 +7,13 @@ SIGNAL TYPES:
 1. ENTRY - New trade entry with direction, entry zone, stop loss, and take profit(s)
 
    Observed formats from this channel:
-   Example 1: This week so far: 31 take profits hit ✅ 2630 + pips 🔥 0 SL 🎯  So many messages asking for VIP, so let’s go👇  @GoldTraderGTS 💎
-   Example 2: Over $21,000 USD 🤑  TP6 ✅💥 200+ pips 📈  22 take profit targets and over 2300+ pips in 3 days. What an entry, 200+ pips in less than 10 minutes 🚀👇  ...
-   Example 3: Managing risk by moving ALL stops to BE 💡
+   Example 1: The London and New York stock exchange is closed today 🇬🇧🇺🇸  You can message me and the team here if you need support or the link to VIP until the ...
+   Example 2: This week so far:  31 take profits hit ✅ 2630 + pips 🔥 0 SL 🎯  VIP OPEN👇  @GoldTraderGTS 💎
+   Example 3: Over $21,000 USD 🤑  TP6 ✅💥  200+ pips 📈  More volatitly after the Trump speech last night and markets again are indecisive. We adapted and hit prof...
 
    Key elements detected:
    - Direction: BUY, SELL
-   - Entry: DIRECTION @ PRICE
+   - Entry: @ PRICE or RANGE
    - Stop Loss: STOP LOSS: XXX
    - Take Profit: TP: XXX
 
@@ -67,8 +67,8 @@ PARSING RULES:
 
 EXAMPLES FROM THIS CHANNEL:
 
-   Example 1: This week so far: 31 take profits hit ✅ 2630 + pips 🔥 0 SL 🎯  So many messages asking for VIP, so let’s go👇  @GoldTraderGTS 💎
-   Example 2: Over $21,000 USD 🤑  TP6 ✅💥 200+ pips 📈  22 take profit targets and over 2300+ pips in 3 days. What an entry, 200+ pips in less than 10 minutes 🚀👇  ...
-   Example 3: Managing risk by moving ALL stops to BE 💡
+   Example 1: The London and New York stock exchange is closed today 🇬🇧🇺🇸  You can message me and the team here if you need support or the link to VIP until the ...
+   Example 2: This week so far:  31 take profits hit ✅ 2630 + pips 🔥 0 SL 🎯  VIP OPEN👇  @GoldTraderGTS 💎
+   Example 3: Over $21,000 USD 🤑  TP6 ✅💥  200+ pips 📈  More volatitly after the Trump speech last night and markets again are indecisive. We adapted and hit prof...
 
 Analyze the message and return only the JSON.

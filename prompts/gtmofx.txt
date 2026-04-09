@@ -7,13 +7,13 @@ SIGNAL TYPES:
 1. ENTRY - New trade entry with direction, entry zone, stop loss, and take profit(s)
 
    Observed formats from this channel:
-   Example 1: Last entry hit breakeven now!
-   Example 2: What a entryyyy again!!!🤑🤑 IN LESS THEN 60 SECONDS AGAIN!!  TP1✅ TP2✅✅
-   Example 3: Gold sell now 4626 - 4629  SL: 4633  TP: 4624 TP: 4622 TP: 4620 TP: open
+   Example 1: As Gold Markets are closed and will be closed for longer till it fully opens again next week Tuesday, I‘ll give back to the community **$1000 Givea...
+   Example 2: What a trader moooo😮‍💨@gtmofx
+   Example 3: Allhamdulillah for the blues 💙💙💙 I think I’m done for today. 😅♥️ @gtmofx
 
    Key elements detected:
-   - Direction: SELL, BUY
-   - Entry: DIRECTION @ PRICE
+   - Direction: BUY, SELL
+   - Entry: @ PRICE or RANGE
    - Stop Loss: SL: XXX
    - Take Profit: TP: XXX
 
@@ -67,8 +67,8 @@ PARSING RULES:
 
 EXAMPLES FROM THIS CHANNEL:
 
-   Example 1: Last entry hit breakeven now!
-   Example 2: What a entryyyy again!!!🤑🤑 IN LESS THEN 60 SECONDS AGAIN!!  TP1✅ TP2✅✅
-   Example 3: Gold sell now 4626 - 4629  SL: 4633  TP: 4624 TP: 4622 TP: 4620 TP: open
+   Example 1: As Gold Markets are closed and will be closed for longer till it fully opens again next week Tuesday, I‘ll give back to the community **$1000 Givea...
+   Example 2: What a trader moooo😮‍💨@gtmofx
+   Example 3: Allhamdulillah for the blues 💙💙💙 I think I’m done for today. 😅♥️ @gtmofx
 
 Analyze the message and return only the JSON.
