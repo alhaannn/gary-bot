@@ -104,7 +104,8 @@ def open_trade(
     sl: float,
     tp: Optional[float],
     comment: str,
-    signal_id: str
+    signal_id: str,
+    lot_size: float = LOT_SIZE
 ) -> int:
     """
     Open a single market order.
@@ -133,7 +134,7 @@ def open_trade(
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": SYMBOL,
-            "volume": LOT_SIZE,
+            "volume": lot_size,
             "type": order_type,
             "price": price,
             "sl": float(sl),
@@ -145,7 +146,7 @@ def open_trade(
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
 
-        logger.info(f"[MT5] [{signal_id}] Opening MARKET {direction} {LOT_SIZE} lot @ {price:.2f}, SL:{sl:.2f}, TP:{tp if tp else 'None'}")
+        logger.info(f"[MT5] [{signal_id}] Opening MARKET {direction} {lot_size} lot @ {price:.2f}, SL:{sl:.2f}, TP:{tp if tp else 'None'}")
 
         # Send order
         result = mt5.order_send(request)
@@ -169,7 +170,8 @@ def open_pending_order(
     sl: float,
     tp: Optional[float],
     comment: str,
-    signal_id: str
+    signal_id: str,
+    lot_size: float = LOT_SIZE
 ) -> int:
     """
     Open a pending order (Buy Limit, Buy Stop, Sell Limit, Sell Stop).
@@ -219,7 +221,7 @@ def open_pending_order(
         request = {
             "action": mt5.TRADE_ACTION_PENDING,
             "symbol": SYMBOL,
-            "volume": LOT_SIZE,
+            "volume": lot_size,
             "type": order_type,
             "price": round(float(entry_price), ENTRY_PRICE_PRECISION),
             "sl": float(sl),
@@ -232,7 +234,7 @@ def open_pending_order(
         }
 
         logger.info(
-            f"[MT5] [{signal_id}] Placing PENDING {order_type_name} {LOT_SIZE} lot "
+            f"[MT5] [{signal_id}] Placing PENDING {order_type_name} {lot_size} lot "
             f"@ {entry_price:.2f} (market: {market_price:.2f}), SL:{sl:.2f}, TP:{tp if tp else 'None'}"
         )
 
@@ -260,7 +262,8 @@ def open_multiple_trades(
     channel_name: str,
     count: int = 2,
     entry_high: Optional[float] = None,
-    entry_low: Optional[float] = None
+    entry_low: Optional[float] = None,
+    lot_size: float = LOT_SIZE
 ) -> List[int]:
     """
     Open multiple trades (N) with smart order routing.
@@ -350,7 +353,8 @@ def open_multiple_trades(
                     sl=sl,
                     tp=tp,
                     comment=comment,
-                    signal_id=signal_id
+                    signal_id=signal_id,
+                    lot_size=lot_size
                 )
             else:
                 ticket = open_trade(
@@ -358,7 +362,8 @@ def open_multiple_trades(
                     sl=sl,
                     tp=tp,
                     comment=comment,
-                    signal_id=signal_id
+                    signal_id=signal_id,
+                    lot_size=lot_size
                 )
 
             if ticket == -1:

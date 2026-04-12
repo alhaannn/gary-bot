@@ -30,7 +30,8 @@ from signal_parser import parse_signal
 from trade_manager import (
     load_trades, add_trade_group, save_trades,
     get_open_groups, get_partial_eligible_groups,
-    mark_ticket_closed, mark_partial_applied
+    mark_ticket_closed, mark_partial_applied,
+    load_martingale_state, set_martingale_active, reset_martingale
 )
 from trade_executor import (
     connect_mt5, disconnect_mt5,
@@ -184,6 +185,14 @@ async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
     tp1 = tp1_val
     tp2 = tp2_val
 
+    # Check martingale state: if previous signal SL'd out, double the lot
+    lot_size = config.LOT_SIZE
+    if getattr(config, 'MARTINGALE_ENABLED', False):
+        mg_state = load_martingale_state(channel_name)
+        if mg_state.get("active", False):
+            lot_size = config.LOT_SIZE * getattr(config, 'MARTINGALE_MULTIPLIER', 2)
+            logger.info(f"[{channel_name}] 🔄 MARTINGALE ACTIVE: using {lot_size} lot (doubled from {config.LOT_SIZE})")
+
     # Open multiple trades (smart routing: market or pending)
     tickets = open_multiple_trades(
         direction=direction,
@@ -193,12 +202,17 @@ async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
         channel_name=channel_name,
         count=trades_count,
         entry_high=entry_high,
-        entry_low=entry_low
+        entry_low=entry_low,
+        lot_size=lot_size
     )
 
     if not tickets:
         logger.error(f"[{channel_name}] ❌ Failed to open trades for signal {signal_id}")
         return
+
+    # Reset martingale after successfully opening trades (win or lose, back to base)
+    if lot_size != config.LOT_SIZE:
+        reset_martingale(channel_name)
 
     # Persist to channel-specific trades file, including TP levels for auto management
     success = add_trade_group(
@@ -213,7 +227,7 @@ async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
     )
 
     if success:
-        logger.info(f"[{channel_name}] ✅ ENTRY signal {signal_id} fully processed: {direction} @ {entry_price:.2f}, {len(tickets)} trades opened")
+        logger.info(f"[{channel_name}] ✅ ENTRY signal {signal_id} fully processed: {direction} @ {entry_price:.2f}, {len(tickets)} trades opened (lot: {lot_size})")
     else:
         logger.error(f"[{channel_name}] ❌ ENTRY signal {signal_id} trades opened but failed to save state")
 
@@ -516,6 +530,47 @@ async def tp_monitor():
                                 logger.error(f"[TP Monitor] Failed to close ticket {ticket}")
 
                         logger.info(f"[TP Monitor] {ch_name} {signal_id}: Full close complete ({len(open_tickets)} tickets closed)")
+
+                    # ===== SL Detection: check if positions vanished from MT5 =====
+                    # If ALL tickets are gone from MT5 and partial was never applied,
+                    # it means all trades were closed by SL → activate martingale
+                    if getattr(config, 'MARTINGALE_ENABLED', False):
+                        all_tickets = group.get("tickets", [])
+                        closed_tickets = group.get("closed_tickets", [])
+                        open_in_state = [t for t in all_tickets if t not in closed_tickets]
+
+                        if open_in_state:
+                            # Check if these "open" tickets actually still exist in MT5
+                            all_gone = True
+                            for ticket in open_in_state:
+                                pos = mt5.positions_get(ticket=ticket)
+                                if pos and len(pos) > 0:
+                                    all_gone = False
+                                    break
+
+                            if all_gone:
+                                partial_was_applied = group.get("partial_applied", False)
+                                # All positions vanished: SL hit (no partial was applied)
+                                if not partial_was_applied:
+                                    logger.warning(
+                                        f"[TP Monitor] {ch_name} {signal_id}: ⚠️ ALL {len(open_in_state)} positions "
+                                        f"vanished from MT5 (SL hit) → activating MARTINGALE for next signal"
+                                    )
+                                    set_martingale_active(ch_name, signal_id)
+                                else:
+                                    logger.info(
+                                        f"[TP Monitor] {ch_name} {signal_id}: Remaining positions closed "
+                                        f"(partial was applied, likely TP2 auto-close)"
+                                    )
+
+                                # Mark all tickets as closed in state
+                                trades = load_trades(ch_name)
+                                for g in trades:
+                                    if g["signal_id"] == signal_id:
+                                        g["closed_tickets"] = list(all_tickets)
+                                        g["fully_closed_at"] = datetime.now().isoformat()
+                                        break
+                                save_trades(trades, ch_name)
 
         except Exception as e:
             logger.error(f"[TP Monitor] Unexpected error: {e}", exc_info=True)

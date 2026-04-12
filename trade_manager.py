@@ -364,3 +364,75 @@ def get_all_channels_trades() -> Dict[str, List[Dict[str, Any]]]:
         if channel["enabled"]:
             all_trades[channel["name"]] = load_trades(channel["name"])
     return all_trades
+
+
+# ========== Martingale State Management ==========
+
+def _get_martingale_file(channel_name: str) -> str:
+    """Get the martingale state file path for a channel."""
+    return f"martingale_{channel_name}.json"
+
+
+def load_martingale_state(channel_name: str) -> Dict[str, Any]:
+    """
+    Load martingale state for a channel.
+
+    Returns:
+        Dict with 'active' (bool), 'triggered_by' (str), 'triggered_at' (str)
+    """
+    filepath = _get_martingale_file(channel_name)
+    try:
+        path = Path(filepath)
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+                return state
+    except Exception as e:
+        logger.error(f"[MARTINGALE] Error loading state for {channel_name}: {e}")
+    return {"active": False}
+
+
+def set_martingale_active(channel_name: str, signal_id: str) -> bool:
+    """
+    Activate martingale for a channel (next trade will be doubled).
+
+    Args:
+        channel_name: Channel identifier
+        signal_id: The signal that triggered SL (for logging)
+
+    Returns:
+        True if saved successfully
+    """
+    filepath = _get_martingale_file(channel_name)
+    state = {
+        "active": True,
+        "triggered_by": signal_id,
+        "triggered_at": datetime.now().isoformat()
+    }
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        logger.info(f"[MARTINGALE] Activated for {channel_name} (triggered by {signal_id})")
+        return True
+    except Exception as e:
+        logger.error(f"[MARTINGALE] Failed to save state for {channel_name}: {e}")
+        return False
+
+
+def reset_martingale(channel_name: str) -> bool:
+    """
+    Reset martingale for a channel (back to normal lot).
+
+    Returns:
+        True if saved successfully
+    """
+    filepath = _get_martingale_file(channel_name)
+    state = {"active": False}
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        logger.info(f"[MARTINGALE] Reset for {channel_name} (back to base lot)")
+        return True
+    except Exception as e:
+        logger.error(f"[MARTINGALE] Failed to reset state for {channel_name}: {e}")
+        return False
