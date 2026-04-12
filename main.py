@@ -142,46 +142,47 @@ async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
         logger.warning(f"[{channel_name}] Unsupported trades_per_signal: {trades_count}, defaulting to 2")
         trades_count = 2
 
-    # Build TP list based on trades_count, supporting both price and pips
-    tp_values = []
-    for i in range(1, trades_count + 1):
-        tp_price = parsed.get(f"tp{i}")
-        if tp_price is not None:
-            tp_values.append(float(tp_price))
-        else:
-            tp_pips = parsed.get(f"tp{i}_pips")
-            if tp_pips is not None:
-                tp = calculate_tp_from_pips(direction, entry_price, int(tp_pips))
-                tp_values.append(tp)
-            else:
-                tp_values.append(None)  # Missing TP
+    # Build TP list: first half of trades get TP1, second half get TP2
+    # For 4 trades: [tp1, tp1, tp2, tp2] so MT5 auto-closes 2 at TP1 and 2 at TP2
+    tp1_val = None
+    tp2_val = None
 
-    # If we have trailing None values and some earlier TPs, duplicate last non-None TP for missing ones
-    # This ensures we open the requested number of trades
-    if any(v is None for v in tp_values):
-        # Find last non-None value
-        last_valid = None
-        for v in tp_values:
-            if v is not None:
-                last_valid = v
-        if last_valid is not None:
-            tp_values = [v if v is not None else last_valid for v in tp_values]
-        else:
-            # All None -> no TPs provided, will open without TP (TP=0.0)
-            tp_values = [None] * trades_count
+    # Get TP1
+    tp1_price = parsed.get("tp1")
+    if tp1_price is not None:
+        tp1_val = float(tp1_price)
+    else:
+        tp1_pips = parsed.get("tp1_pips")
+        if tp1_pips is not None:
+            tp1_val = calculate_tp_from_pips(direction, entry_price, int(tp1_pips))
+
+    # Get TP2
+    tp2_price = parsed.get("tp2")
+    if tp2_price is not None:
+        tp2_val = float(tp2_price)
+    else:
+        tp2_pips = parsed.get("tp2_pips")
+        if tp2_pips is not None:
+            tp2_val = calculate_tp_from_pips(direction, entry_price, int(tp2_pips))
+
+    # If only TP1 exists, use it for all trades
+    # If only TP2 exists, use it for all trades
+    # If both exist, split: first half = TP1, second half = TP2
+    if tp1_val is not None and tp2_val is not None:
+        half = trades_count // 2
+        tp_values = [tp1_val] * half + [tp2_val] * (trades_count - half)
+    elif tp1_val is not None:
+        tp_values = [tp1_val] * trades_count
+    elif tp2_val is not None:
+        tp_values = [tp2_val] * trades_count
+    else:
+        tp_values = [None] * trades_count
 
     logger.info(f"[{channel_name}] TP values for {trades_count} trades: {tp_values}")
 
-    # Extract TP1 and TP2 for auto management (first two non-None TPs)
-    tp1 = None
-    tp2 = None
-    for val in tp_values:
-        if val is not None:
-            if tp1 is None:
-                tp1 = float(val)
-            elif tp2 is None:
-                tp2 = float(val)
-                break
+    # Use TP1 and TP2 for auto management (already extracted above)
+    tp1 = tp1_val
+    tp2 = tp2_val
 
     # Open multiple trades (smart routing: market or pending)
     tickets = open_multiple_trades(
