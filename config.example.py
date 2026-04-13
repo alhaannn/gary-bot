@@ -31,7 +31,7 @@ CHANNELS = [
         "name": "gary",  # Internal identifier (lowercase, no spaces)
         "username": "Gary_TheTrader",  # Channel username (with or without @)
         "enabled": True,  # Set False to disable temporarily
-        "trades_per_signal": 2,  # Number of trades to open per signal (2 or 4)
+        "trades_per_signal": 4,  # Number of trades to open per signal (2 or 4)
         "prompt_file": "prompts/gary.txt"  # Path to channel-specific prompt
     },
     {
@@ -45,21 +45,21 @@ CHANNELS = [
         "name": "bengoldtrader",
         "username": "bengoldtrader",
         "enabled": True,
-        "trades_per_signal": 2,
+        "trades_per_signal": 4,
         "prompt_file": "prompts/bengoldtrader.txt"
     },
     {
         "name": "gtmofx",
         "username": "gtmofx",
         "enabled": True,
-        "trades_per_signal": 2,
+        "trades_per_signal": 4,
         "prompt_file": "prompts/gtmofx.txt"
     },
     {
         "name": "traderalhan",
         "username": "traderalhan",
         "enabled": True,
-        "trades_per_signal": 2,
+        "trades_per_signal": 4,
         "prompt_file": "prompts/traderalhan.txt"
     }
 ]
@@ -92,7 +92,7 @@ PIP_MULTIPLIER = 0.1  # XAUUSD: 1 pip = 0.1
 
 # ========== Timestamp Validation ==========
 # Reject messages older/newer than this many seconds
-TIMESTAMP_THRESHOLD = 5  # seconds
+TIMESTAMP_THRESHOLD = 90  # seconds (increased for message batching after reconnects)
 
 # ========== Historical Message Fetching ==========
 # Used by fetch_history.py to analyze channel patterns
@@ -102,10 +102,27 @@ HISTORY_OUTPUT_DIR = "history"  # Where to save raw messages
 # ========== Automatic TP Management ==========
 # Enable to automatically monitor positions and trigger partial/full closes
 # when TP1/TP2 levels are reached (no manual signals needed)
-AUTO_TP_MANAGEMENT = False  # Set True to enable
+AUTO_TP_MANAGEMENT = True  # Recommended: TP monitor handles closes based on actual price
 TP_MONITOR_INTERVAL = 5  # Check interval in seconds
+
+# ========== Smart Order Placement ==========
+# If market price is within this many points of the entry zone, use market order
+# Only place pending orders when market is farther than this from the zone edge
+ENTRY_ZONE_TOLERANCE = 4.0  # points (XAUUSD)
+
+# ========== 1-Step Martingale ==========
+# After all trades in a group hit SL, double lot size on next signal for that channel
+MARTINGALE_ENABLED = True
+MARTINGALE_MULTIPLIER = 2  # 2x lot on recovery trade (0.01 -> 0.02)
 
 # ========== File Paths ==========
 TRADES_FILE = "trades.json"  # Legacy single-channel state file (ignored in multi-channel)
 LOG_FILE = "gary_bot.log"
 SESSION_FILE = "gary_bot_session"
+
+# ========== Reconnect Settings ==========
+MAX_RECONNECT_ATTEMPTS = 10          # Max retries before giving up
+RECONNECT_BASE_DELAY = 5             # Initial delay in seconds
+RECONNECT_MAX_DELAY = 60             # Max delay between retries
+RECONNECT_ELEVATED_THRESHOLD = 120   # Temporary threshold after reconnect (seconds)
+RECONNECT_ELEVATED_DURATION = 120    # How long to keep elevated threshold (seconds)

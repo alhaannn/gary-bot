@@ -6,6 +6,9 @@ A fully automated trading bot that monitors multiple Telegram channels for gold 
 - 📺 **Multi-channel support** - Monitor multiple signal providers simultaneously
 - 🤖 **AI-powered classification** - Groq Llama 3.3 70B understands each channel's unique style
 - 🔄 **Auto-adaptive prompts** - Fetch and analyze channel history to generate perfect prompts
+- 🧠 **Smart order routing** - Market order when price is near entry zone, pending order when far
+- 📊 **Auto TP management** - Monitors positions and auto-closes at TP1/TP2 levels
+- 📈 **1-step martingale** - Doubles lot size on next signal after SL hit, then resets
 - 🧪 **Universal testing channel** - Test new configurations with `@traderalhan`
 - 💾 **Per-channel state** - Isolated trade tracking per channel
 - ⚙️ **Flexible trade counts** - Supports 2 or 4 trades per signal based on channel config
@@ -17,9 +20,11 @@ A fully automated trading bot that monitors multiple Telegram channels for gold 
 - **AI-powered signal classification** via Groq API (Llama 3.3 70B)
 - **Channel-specific prompts** - Each trader's unique signal style is learned and adapted to
 - **Automatic trade execution** on MetaTrader5
+- **Smart order routing** - Market orders when price is near entry zone (≤4pts), pending orders when far
 - **Flexible trade strategy** - Supports 2 or 4 trades per signal (configurable per channel)
 - **Persistent state** - Survives bot restarts via per-channel `trades_{channel}.json` files
-- **Partial close management** - Close T1, move T2 to breakeven
+- **Automatic TP management** - Monitors positions and auto-closes at TP1/TP2 (recommended)
+- **1-Step Martingale** - Doubles lot size after full SL hit, resets after next trade
 - **Full position management** - Complete close on signal
 - **Stop-loss handling** - Automatic tracking of SL hits and SL modifications
 - **Position stacking** - Opens new trades regardless of existing positions
@@ -236,27 +241,37 @@ Press `Ctrl+C` for graceful shutdown:
 ### Entry Signal
 
 When an ENTRY signal is detected:
-- **Entry Price**: Midpoint of entry zone `(high + low) / 2`
-- **Trade 1 (T1)**: 0.01 lot with TP1
-- **Trade 2 (T2)**: 0.01 lot with TP2 (200ms delay)
-- Both trades share the same SL
-- Trade comments identify T1/T2 with signal ID
+- **Entry Price**: Uses actual MT5 fill price (queried after execution)
+- **Smart Routing**: Market order if price is within entry zone or ≤4 points away; pending order at nearest zone edge otherwise
+- **Trade 1-2 (T1, T2)**: With TP1 target
+- **Trade 3-4 (T3, T4)**: With TP2 target (200ms delay between each)
+- All trades share the same SL
+- Trade comments identify T1-T4 with signal ID
 
-Example signal:
-```
-Gold Buy Now @ 4481 - 4476  Sl: 4471  TP: 4486/4491
-```
-- Entry zone: 4476-4481 → entry: 4478.5
-- SL: 4471
-- T1 TP: 4486
-- T2 TP: 4491
+### Automatic TP Management (Recommended)
 
-### Partial Close
+Set `AUTO_TP_MANAGEMENT = True` in your `config.py`. The bot will:
 
-On PARTIAL signal (e.g., "60Pips can close some now"):
-- Closes **T1** fully
-- Moves **T2** stop loss to breakeven (entry price)
-- T2 continues running with no risk
+1. **TP1 hit** → MT5 auto-closes T1+T2 → Monitor moves T3+T4 SL to **actual entry price** (breakeven)
+2. **TP2 hit** → MT5 auto-closes T3+T4
+
+> **Note:** PARTIAL signals from Telegram are **ignored** when auto TP management is enabled. The bot relies on actual price levels, not trader messages, for partial closes. This prevents premature closes when your fill price differs from the signal.
+
+### 1-Step Martingale
+
+Set `MARTINGALE_ENABLED = True` in your `config.py`. If all 4 trades in a group hit SL:
+
+1. TP monitor detects all positions vanished from MT5
+2. Activates martingale for that channel
+3. Next entry signal opens at **double lot size** (e.g., 0.01 → 0.02)
+4. After the doubled trade (win or lose), resets back to base lot
+
+State persists across restarts via `martingale_{channel}.json` files.
+
+### Partial Close (Legacy - Disabled by default)
+
+When `AUTO_TP_MANAGEMENT = True`, PARTIAL signals from Telegram are logged but ignored.
+The TP monitor handles partial closes automatically based on actual MT5 price data.
 
 ### Full Close
 
@@ -346,7 +361,8 @@ Logs are written to both console and `gary_bot.log`:
 | `TRADE_DELAY` | 0.2 | Delay between T1 and T2 opening (seconds) |
 | `GROQ_MODEL` | "llama-3.3-70b-versatile" | LLM model for signal classification |
 | `GROQ_TIMEOUT` | 10 | API timeout in seconds |
-| `TIMESTAMP_THRESHOLD` | 5 | Reject messages older/newer than this many seconds |
+| `TIMESTAMP_THRESHOLD` | 90 | Reject messages older/newer than this many seconds |
+| `ENTRY_ZONE_TOLERANCE` | 4.0 | Market order if price is within this many points of entry zone |
 
 ### Multi-Channel Settings
 
@@ -364,19 +380,42 @@ The bot can automatically monitor open positions and trigger partial/full closes
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AUTO_TP_MANAGEMENT` | False | Set True to enable automatic TP monitoring |
+| `AUTO_TP_MANAGEMENT` | **True** (recommended) | Enables automatic TP monitoring - closes trades at TP1/TP2 levels |
 | `TP_MONITOR_INTERVAL` | 5 | Check interval in seconds (how often to scan positions) |
+
+> **⚠️ Important:** Set `AUTO_TP_MANAGEMENT = True` in your `config.py`. When enabled, the bot monitors actual price levels and handles partial/full closes automatically. PARTIAL signals from Telegram are ignored to prevent premature closes.
 
 **How it works:**
 - When a trade group is opened, the TP1 and TP2 levels are stored in the state.
-- If `AUTO_TP_MANAGEMENT=True`, a background task periodically checks the current market price against TP1/TP2.
-- **At TP1**: Closes half of the open trades in the group and moves the remaining half to breakeven.
-- **At TP2**: Closes all remaining trades in the group.
-- This works for any number of trades per signal (2, 4, etc.).
-- The logic is identical to the manual `PARTIAL` and `CLOSE` signals, just triggered automatically.
-- You can still send manual signals; they will work alongside auto monitoring (auto respects already-applied partials).
+- T1+T2 are assigned TP1, T3+T4 are assigned TP2.
+- **At TP1**: MT5 auto-closes T1+T2, monitor moves T3+T4 SL to **actual fill price** (breakeven).
+- **At TP2**: MT5 auto-closes T3+T4.
+- The entry price used for breakeven is the **real MT5 fill price**, not the signal's suggested price.
 
-**Important:** You must have TP1 and TP2 defined in the signal (either as absolute prices or pips). The bot captures these when the ENTRY signal is processed.
+### 1-Step Martingale
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MARTINGALE_ENABLED` | True | Double lot size after full SL hit |
+| `MARTINGALE_MULTIPLIER` | 2 | Multiplier for recovery trade (1x base = 0.01 → 0.02) |
+
+**How it works:**
+- TP monitor detects when all positions in a group vanish from MT5 (SL hit)
+- Activates martingale for that specific channel only
+- Next ENTRY on that channel opens at doubled lot size
+- After that trade (win or lose), resets to base lot
+- State persists in `martingale_{channel}.json` files
+
+### Smart Order Routing
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENTRY_ZONE_TOLERANCE` | 4.0 | Points threshold for market vs pending order |
+
+**How it works:**
+- If market price is **within** entry zone or **≤4 points** from nearest edge: **Market Order**
+- If market price is **>4 points** from entry zone: **Pending Order** at nearest zone edge
+- Pending orders use the nearest edge price (not midpoint)
 
 ## Analysis & Prompt Generation Tools
 
