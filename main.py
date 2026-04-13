@@ -88,7 +88,8 @@ async def handle_message(message_text: str, channel_name: str):
             await handle_trade_entry(parsed, signal_id, channel_name)
 
         elif signal_type == "PARTIAL":
-            await handle_partial_signal(parsed, channel_name)
+            # DISABLED: TP monitor handles partial closes automatically based on actual price
+            logger.info(f"[{channel_name}] ℹ️ PARTIAL signal ignored (TP monitor handles this)")
 
         elif signal_type == "CLOSE":
             await handle_close_signal(parsed, channel_name)
@@ -210,6 +211,21 @@ async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
         logger.error(f"[{channel_name}] ❌ Failed to open trades for signal {signal_id}")
         return
 
+    # Get actual fill price from MT5 (not the parsed signal price)
+    # This ensures breakeven SL uses the real entry, not the signal's suggested price
+    actual_entry_price = entry_price  # fallback to parsed price
+    try:
+        position = mt5.positions_get(ticket=tickets[0])
+        if position and len(position) > 0:
+            actual_entry_price = position[0].price_open
+            if abs(actual_entry_price - entry_price) > 0.01:
+                logger.info(
+                    f"[{channel_name}] Fill price {actual_entry_price:.2f} differs from signal "
+                    f"entry {entry_price:.2f} — using actual fill for breakeven"
+                )
+    except Exception as e:
+        logger.warning(f"[{channel_name}] Could not query fill price: {e}, using parsed entry")
+
     # Reset martingale after successfully opening trades (win or lose, back to base)
     if lot_size != config.LOT_SIZE:
         reset_martingale(channel_name)
@@ -218,7 +234,7 @@ async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
     success = add_trade_group(
         signal_id=signal_id,
         direction=direction,
-        entry_price=entry_price,
+        entry_price=actual_entry_price,
         sl=sl,
         tickets=tickets,
         channel_name=channel_name,
@@ -227,7 +243,7 @@ async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
     )
 
     if success:
-        logger.info(f"[{channel_name}] ✅ ENTRY signal {signal_id} fully processed: {direction} @ {entry_price:.2f}, {len(tickets)} trades opened (lot: {lot_size})")
+        logger.info(f"[{channel_name}] ✅ ENTRY signal {signal_id} fully processed: {direction} @ {actual_entry_price:.2f}, {len(tickets)} trades opened (lot: {lot_size})")
     else:
         logger.error(f"[{channel_name}] ❌ ENTRY signal {signal_id} trades opened but failed to save state")
 
