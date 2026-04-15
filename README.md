@@ -13,7 +13,7 @@ A fully automated trading bot that monitors multiple Telegram channels for gold 
 - 💾 **Per-channel state** - Isolated trade tracking per channel
 - ⚙️ **Flexible trade counts** - Supports 2 or 4 trades per signal based on channel config
 
-<details>
+<details open>
 <summary><h2>Features</h2></summary>
 
 
