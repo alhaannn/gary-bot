@@ -13,7 +13,9 @@ A fully automated trading bot that monitors multiple Telegram channels for gold 
 - 💾 **Per-channel state** - Isolated trade tracking per channel
 - ⚙️ **Flexible trade counts** - Supports 2 or 4 trades per signal based on channel config
 
-## Features
+<details>
+<summary><h2>Features</h2></summary>
+
 
 ### Core Functionality
 - **Real-time Telegram monitoring** using Telethon across multiple channels
@@ -31,6 +33,7 @@ A fully automated trading bot that monitors multiple Telegram channels for gold 
 - **Robust error handling** - Never crashes on message parsing errors
 - **Comprehensive logging** - Console + file with emoji indicators and per-channel context
 - **Real-Time Web Dashboard** - Synchronizes telemetry to Supabase and broadcasts trade cards to Telegram with an embedded Mini-App to track equity curve and calendar PnL.
+  - 🌐 **[Download the GaryBot Next.js Dashboard App here](https://github.com/alhaannn/Gary-Bot-Dashboard)**
 
 ### Advanced Features
 - **Auto-reconnect** - Handles Telegram timestamp desync issues automatically
@@ -39,7 +42,11 @@ A fully automated trading bot that monitors multiple Telegram channels for gold 
 - **Dynamic prompt generation** - Analyze channel history to create optimal prompts (via `fetch_history.py`)
 - **Universal testing channel** - `@traderalhan` combines patterns from all channels for testing
 
-## Project Structure
+</details>
+
+<details>
+<summary><h2>Project Structure</h2></summary>
+
 
 ```
 gary-bot/
@@ -70,14 +77,22 @@ gary-bot/
 └── gary_bot.log           # Created at runtime - debug logs
 ```
 
-## Prerequisites
+</details>
+
+<details>
+<summary><h2>Prerequisites</h2></summary>
+
 
 1. **Python 3.8+** installed
 2. **MetaTrader5 terminal** installed and running with a funded account
 3. **Telegram account** with API credentials
 4. **Groq API key** from https://console.groq.com
 
-## Installation
+</details>
+
+<details>
+<summary><h2>Installation</h2></summary>
+
 
 ### 1. Clone Repository
 
@@ -209,7 +224,11 @@ python -c "import MetaTrader5; print('MT5 package OK')"
 
 And ensure MT5 terminal is running and you're logged in to your account.
 
-## Usage
+</details>
+
+<details>
+<summary><h2>Usage</h2></summary>
+
 
 ### Starting the Bot
 
@@ -242,7 +261,11 @@ Press `Ctrl+C` for graceful shutdown:
 - Telegram session disconnected
 - Trade state remains in `trades.json`
 
-## Trade Logic
+</details>
+
+<details>
+<summary><h2>Trade Logic</h2></summary>
+
 
 ### Entry Signal
 
@@ -292,7 +315,11 @@ On SL_HIT signal (e.g., "This setup hit SL. Wait for recovery"):
 - MT5 already closed positions via stop-loss
 - Bot marks them as closed in state for consistency
 
-## State Management
+</details>
+
+<details>
+<summary><h2>State Management</h2></summary>
+
 
 ### Multi-Channel State
 
@@ -337,9 +364,17 @@ On startup, the bot automatically:
 
 This ensures bot restarts or crashes never lose track of open trades.
 
-## Logging
+</details>
 
-## Logging
+<details>
+<summary><h2>Logging</h2></summary>
+
+
+</details>
+
+<details>
+<summary><h2>Logging</h2></summary>
+
 
 Logs are written to both console and `gary_bot.log`:
 
@@ -354,7 +389,11 @@ Logs are written to both console and `gary_bot.log`:
   - `[MAIN]` - Orchestration
 - **Emojis**: ✅ success, ❌ failure, ⚠️ warning
 
-## Configuration Options
+</details>
+
+<details>
+<summary><h2>Configuration Options</h2></summary>
+
 
 ### Core Settings
 
@@ -423,7 +462,11 @@ The bot can automatically monitor open positions and trigger partial/full closes
 - If market price is **>4 points** from entry zone: **Pending Order** at nearest zone edge
 - Pending orders use the nearest edge price (not midpoint)
 
-## Analysis & Prompt Generation Tools
+</details>
+
+<details>
+<summary><h2>Analysis & Prompt Generation Tools</h2></summary>
+
 
 GaryBot includes powerful tools to automatically understand each channel's signal style and generate optimal prompts.
 
@@ -469,7 +512,11 @@ The original standalone analyzer. Similar functionality but with fixed 200-messa
 python run_analyzer.py
 ```
 
-## Troubleshooting
+</details>
+
+<details>
+<summary><h2>Troubleshooting</h2></summary>
+
 
 ### MT5 Connection Fails
 - Ensure MT5 terminal is running
@@ -499,7 +546,11 @@ All errors are caught and logged. Check:
 - MT5 connection stability
 - Memory usage (24/7 operation)
 
-## Security Notes
+</details>
+
+<details>
+<summary><h2>Security Notes</h2></summary>
+
 
 1. **Never commit** `config.py` - it contains real credentials
 2. Use environment variables in production if desired
@@ -507,7 +558,11 @@ All errors are caught and logged. Check:
 4. `trades.json` contains MT5 ticket numbers - keep private
 5. Telegram session file (`gary_bot_session.session`) grants access to your Telegram account - keep secure
 
-## Production Deployment
+</details>
+
+<details>
+<summary><h2>Production Deployment</h2></summary>
+
 
 Recommended for Windows Server EC2:
 
@@ -526,7 +581,11 @@ nssm install GaryBot "C:\Python39\python.exe" "C:\gary-bot\main.py"
 nssm start GaryBot
 ```
 
-## Disclaimer
+</details>
+
+<details>
+<summary><h2>Disclaimer</h2></summary>
+
 
 This bot is for **educational purposes** only. Trading involves significant risk of loss. Past performance does not guarantee future results.
 
@@ -537,11 +596,19 @@ This bot is for **educational purposes** only. Trading involves significant risk
 - Keep MT5 terminal running 24/7
 - Ensure stable internet connection
 
-## License
+</details>
+
+<details>
+<summary><h2>License</h2></summary>
+
 
 MIT License - feel free to modify and use as needed.
 
-## Support
+</details>
+
+<details>
+<summary><h2>Support</h2></summary>
+
 
 For issues, feature requests, or questions:
 - Open an issue on GitHub
@@ -551,3 +618,5 @@ For issues, feature requests, or questions:
 ---
 
 **Happy Trading!** 🚀💰
+
+</details>
