@@ -30,6 +30,7 @@ A fully automated trading bot that monitors multiple Telegram channels for gold 
 - **Position stacking** - Opens new trades regardless of existing positions
 - **Robust error handling** - Never crashes on message parsing errors
 - **Comprehensive logging** - Console + file with emoji indicators and per-channel context
+- **Real-Time Web Dashboard** - Synchronizes telemetry to Supabase and broadcasts trade cards to Telegram with an embedded Mini-App to track equity curve and calendar PnL.
 
 ### Advanced Features
 - **Auto-reconnect** - Handles Telegram timestamp desync issues automatically
@@ -115,6 +116,11 @@ pip install -r requirements.txt
    MT5_LOGIN = "your_account_number"
    MT5_PASSWORD = "your_mt5_password"
    MT5_SERVER = "your-broker-server.com"
+
+   # Dashboard Connectivity (Supabase telemetry)
+   SUPABASE_URL = "your_supabase_project_url"
+   SUPABASE_KEY = "your_supabase_api_key"
+   DASHBOARD_URL = "https://your-vercel-dashboard.vercel.app" # The app that opens via Telegram
    ```
 
    **Important:** Never commit `config.py` to git. It's already in `.gitignore`.

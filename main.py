@@ -41,6 +41,7 @@ from trade_executor import (
 from telegram_listener import start_multi_listener
 from telethon.errors import PersistentTimestampOutdatedError
 import MetaTrader5 as mt5
+from notifier import send_telegram_alert, push_trade_to_db
 
 
 def get_channel_config(channel_name: str) -> Optional[Dict]:
@@ -244,6 +245,17 @@ async def handle_trade_entry(parsed: dict, signal_id: str, channel_name: str):
 
     if success:
         logger.info(f"[{channel_name}] ✅ ENTRY signal {signal_id} fully processed: {direction} @ {actual_entry_price:.2f}, {len(tickets)} trades opened (lot: {lot_size})")
+        trade_data = {
+            "pair": config.SYMBOL,
+            "action": direction,
+            "entry_price": actual_entry_price,
+            "sl": sl,
+            "tp": tp1,
+            "channel": channel_name
+        }
+        send_telegram_alert(trade_data, "signal")
+        send_telegram_alert(trade_data, "entry")
+        push_trade_to_db(trade_data, "OPEN")
     else:
         logger.error(f"[{channel_name}] ❌ ENTRY signal {signal_id} trades opened but failed to save state")
 
@@ -336,6 +348,9 @@ async def handle_close_signal(parsed: dict, channel_name: str):
         for ticket in open_tickets:
             if close_trade(ticket, signal_id):
                 mark_ticket_closed(signal_id, ticket, channel_name)
+                trade_data = {"pair": config.SYMBOL, "action": "CLOSE", "channel": channel_name}
+                send_telegram_alert(trade_data, "close")
+                push_trade_to_db(trade_data, "CLOSED")
             else:
                 logger.error(f"[{channel_name}] ❌ Failed to close ticket {ticket} for {signal_id}")
 
@@ -502,6 +517,9 @@ async def tp_monitor():
                             for ticket in to_close:
                                 if close_trade(ticket, signal_id):
                                     mark_ticket_closed(signal_id, ticket, ch_name)
+                                    trade_data = {"pair": config.SYMBOL, "action": "TP1 HIT PARTIAL", "channel": ch_name}
+                                    send_telegram_alert(trade_data, "close")
+                                    push_trade_to_db(trade_data, "CLOSED_PARTIAL")
                                 else:
                                     logger.error(f"[TP Monitor] Failed to close ticket {ticket}")
 
@@ -542,6 +560,9 @@ async def tp_monitor():
                         for ticket in open_tickets:
                             if close_trade(ticket, signal_id):
                                 mark_ticket_closed(signal_id, ticket, ch_name)
+                                trade_data = {"pair": config.SYMBOL, "action": "TP2 HIT FULL CLOSE", "channel": ch_name}
+                                send_telegram_alert(trade_data, "close")
+                                push_trade_to_db(trade_data, "CLOSED")
                             else:
                                 logger.error(f"[TP Monitor] Failed to close ticket {ticket}")
 
@@ -585,6 +606,9 @@ async def tp_monitor():
                                     if g["signal_id"] == signal_id:
                                         g["closed_tickets"] = list(all_tickets)
                                         g["fully_closed_at"] = datetime.now().isoformat()
+                                        trade_data = {"pair": config.SYMBOL, "action": "STOP LOSS HIT", "channel": ch_name}
+                                        send_telegram_alert(trade_data, "close")
+                                        push_trade_to_db(trade_data, "CLOSED_SL")
                                         break
                                 save_trades(trades, ch_name)
 

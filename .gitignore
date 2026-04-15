@@ -72,3 +72,6 @@ secrets.env
 *.hst
 *.hcc
 *.dat
+
+# Sub-repositories
+dashboard/

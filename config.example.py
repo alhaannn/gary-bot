@@ -15,7 +15,14 @@ Set USE_LEGACY_SINGLE_CHANNEL = False (default) to use multiple channels.
 Define each channel in the CHANNELS list with its unique prompt file.
 """
 
-# ========== Telegram Credentials ==========
+# ========== Dashboard & Notification Credentials ==========
+SUPABASE_URL = "your_supabase_url_here"
+SUPABASE_KEY = "your_supabase_anon_key_here"
+TELEGRAM_BOT_TOKEN = "your_telegram_bot_token_here"
+TELEGRAM_BOT_CHAT_ID = "your_telegram_chat_id_here"
+DASHBOARD_URL = "http://localhost:3000"
+
+# ========== Telegram User Credentials ==========
 # Get these from https://my.telegram.org/apps
 TELEGRAM_API_ID = 1234567  # Your numeric API ID (int)
 TELEGRAM_API_HASH = "your_api_hash_here"  # Your API Hash (str)
