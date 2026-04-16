@@ -44,6 +44,17 @@ import MetaTrader5 as mt5
 from notifier import send_telegram_alert, push_trade_to_db
 
 
+def get_ticket_pnl(ticket: int) -> float:
+    """Query MT5 for the realized profit of a position BEFORE closing it."""
+    try:
+        pos = mt5.positions_get(ticket=ticket)
+        if pos and len(pos) > 0:
+            return pos[0].profit
+    except Exception as e:
+        logger.error(f"[PnL] Failed to get PnL for ticket {ticket}: {e}")
+    return 0.0
+
+
 def get_channel_config(channel_name: str) -> Optional[Dict]:
     """Get channel configuration by name. Supports legacy single-channel mode."""
     if config.USE_LEGACY_SINGLE_CHANNEL:
@@ -513,13 +524,14 @@ async def tp_monitor():
                             to_close = open_tickets[:close_count]
                             to_be = open_tickets[close_count:]
 
-                            # Close selected tickets
+                            # Close selected tickets and aggregate PnL
+                            partial_pnl = 0.0
+                            closed_count = 0
                             for ticket in to_close:
+                                partial_pnl += get_ticket_pnl(ticket)
                                 if close_trade(ticket, signal_id):
                                     mark_ticket_closed(signal_id, ticket, ch_name)
-                                    trade_data = {"pair": config.SYMBOL, "action": "TP1 HIT PARTIAL", "channel": ch_name}
-                                    send_telegram_alert(trade_data, "close")
-                                    push_trade_to_db(trade_data, "CLOSED_PARTIAL")
+                                    closed_count += 1
                                 else:
                                     logger.error(f"[TP Monitor] Failed to close ticket {ticket}")
 
@@ -528,6 +540,21 @@ async def tp_monitor():
                             for ticket in to_be:
                                 if not move_sl_to_breakeven(ticket, entry_price, signal_id):
                                     logger.error(f"[TP Monitor] Failed to move ticket {ticket} to BE")
+
+                            # Send ONE consolidated alert for the partial close
+                            if closed_count > 0:
+                                trade_data = {
+                                    "id": signal_id,
+                                    "pair": config.SYMBOL,
+                                    "action": "TP1 HIT PARTIAL",
+                                    "entry_price": target_group.get("entry_price"),
+                                    "sl": target_group.get("sl"),
+                                    "tp": target_group.get("tp1"),
+                                    "pnl": round(partial_pnl, 2),
+                                    "channel": ch_name
+                                }
+                                send_telegram_alert(trade_data, "close")
+                                push_trade_to_db(trade_data, "CLOSED_PARTIAL")
 
                             # Mark partial applied
                             target_group["partial_applied"] = True
@@ -556,17 +583,33 @@ async def tp_monitor():
                         if not open_tickets:
                             continue
 
-                        # Close all open tickets
+                        # Close all open tickets and aggregate PnL
+                        full_pnl = 0.0
+                        closed_count = 0
                         for ticket in open_tickets:
+                            full_pnl += get_ticket_pnl(ticket)
                             if close_trade(ticket, signal_id):
                                 mark_ticket_closed(signal_id, ticket, ch_name)
-                                trade_data = {"pair": config.SYMBOL, "action": "TP2 HIT FULL CLOSE", "channel": ch_name}
-                                send_telegram_alert(trade_data, "close")
-                                push_trade_to_db(trade_data, "CLOSED")
+                                closed_count += 1
                             else:
                                 logger.error(f"[TP Monitor] Failed to close ticket {ticket}")
 
-                        logger.info(f"[TP Monitor] {ch_name} {signal_id}: Full close complete ({len(open_tickets)} tickets closed)")
+                        # Send ONE consolidated alert for the full close
+                        if closed_count > 0:
+                            trade_data = {
+                                "id": signal_id,
+                                "pair": config.SYMBOL,
+                                "action": "TP2 HIT FULL CLOSE",
+                                "entry_price": target_group.get("entry_price"),
+                                "sl": target_group.get("sl"),
+                                "tp": target_group.get("tp2"),
+                                "pnl": round(full_pnl, 2),
+                                "channel": ch_name
+                            }
+                            send_telegram_alert(trade_data, "close")
+                            push_trade_to_db(trade_data, "CLOSED")
+
+                        logger.info(f"[TP Monitor] {ch_name} {signal_id}: Full close complete ({closed_count} tickets closed, PnL: ${full_pnl:.2f})")
 
                     # ===== SL Detection: check if positions vanished from MT5 =====
                     # If ALL tickets are gone from MT5 and partial was never applied,
@@ -606,7 +649,16 @@ async def tp_monitor():
                                     if g["signal_id"] == signal_id:
                                         g["closed_tickets"] = list(all_tickets)
                                         g["fully_closed_at"] = datetime.now().isoformat()
-                                        trade_data = {"pair": config.SYMBOL, "action": "STOP LOSS HIT", "channel": ch_name}
+                                        trade_data = {
+                                            "id": signal_id,
+                                            "pair": config.SYMBOL,
+                                            "action": "STOP LOSS HIT",
+                                            "entry_price": g.get("entry_price"),
+                                            "sl": g.get("sl"),
+                                            "tp": g.get("tp1"),
+                                            "pnl": 0,  # SL positions already auto-closed by MT5
+                                            "channel": ch_name
+                                        }
                                         send_telegram_alert(trade_data, "close")
                                         push_trade_to_db(trade_data, "CLOSED_SL")
                                         break

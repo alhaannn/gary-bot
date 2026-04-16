@@ -1,9 +1,13 @@
 import requests
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_CHAT_ID, SUPABASE_URL, SUPABASE_KEY, DASHBOARD_URL
-from supabase import create_client, Client
 
-# Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_URL != "your_supabase_url_here" else None
+# Supabase REST API headers (no SDK needed)
+SUPABASE_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "resolution=merge-duplicates"
+} if SUPABASE_URL and SUPABASE_KEY else {}
 
 def send_telegram_alert(trade_data: dict, action_type: str = "signal"):
     """
@@ -37,6 +41,9 @@ def send_telegram_alert(trade_data: dict, action_type: str = "signal"):
         text = (
             f"<b>{icon} POSITION CLOSED {icon}</b>\n\n"
             f"🪙 <b>Pair:</b> {trade_data.get('pair')}\n"
+            f"📈 <b>Type:</b> {trade_data.get('action')}\n"
+            f"💵 <b>Entry:</b> {trade_data.get('entry_price', 'N/A')}\n"
+            f"🎯 <b>TP:</b> {trade_data.get('tp', 'N/A')}\n"
             f"💸 <b>PnL:</b> ${pnl}\n"
         )
     else:
@@ -67,19 +74,19 @@ def send_telegram_alert(trade_data: dict, action_type: str = "signal"):
 
 def push_trade_to_db(trade_data: dict, status: str):
     """
-    Pushes or updates trade history in Supabase.
+    Pushes or updates trade history in Supabase via REST API (no SDK needed).
+    Uses signal_id as primary key for upsert so we don't create duplicate rows.
     """
-    if not supabase:
+    if not SUPABASE_HEADERS:
         return
     
     try:
-        # Avoid empty floats causing db crash
         entry = float(trade_data.get("entry_price")) if trade_data.get("entry_price") else None
         sl = float(trade_data.get("sl")) if trade_data.get("sl") else None
         tp = float(trade_data.get("tp")) if trade_data.get("tp") else None
         pnl = float(trade_data.get("pnl", 0))
 
-        data, count = supabase.table("trades").upsert({
+        row = {
             "pair": trade_data.get("pair"),
             "action": trade_data.get("action"),
             "entry_price": entry,
@@ -88,7 +95,16 @@ def push_trade_to_db(trade_data: dict, status: str):
             "status": status,
             "pnl": pnl,
             "channel": trade_data.get("channel", "Unknown")
-        }).execute()
-        return data
+        }
+
+        # If trade_data includes an 'id' (signal_id), use it for upsert
+        if trade_data.get("id"):
+            row["id"] = trade_data["id"]
+
+        # Use Supabase REST API directly (PostgREST)
+        api_url = f"{SUPABASE_URL}/rest/v1/trades"
+        response = requests.post(api_url, json=row, headers=SUPABASE_HEADERS, timeout=5)
+        response.raise_for_status()
+        return response.json() if response.text else None
     except Exception as e:
         print(f"Failed to push trade to DB: {e}")
