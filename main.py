@@ -112,6 +112,9 @@ async def handle_message(message_text: str, channel_name: str):
         elif signal_type == "SL_MODIFY":
             await handle_sl_modify_signal(parsed, channel_name)
 
+        elif signal_type == "CANCEL":
+            await handle_cancel_signal(channel_name)
+
         elif signal_type == "IGNORE":
             logger.debug(f"[{channel_name}] ⏭️ IGNORE - Skipping")
         else:
@@ -364,6 +367,49 @@ async def handle_close_signal(parsed: dict, channel_name: str):
                 push_trade_to_db(trade_data, "CLOSED")
             else:
                 logger.error(f"[{channel_name}] ❌ Failed to close ticket {ticket} for {signal_id}")
+
+
+async def handle_cancel_signal(channel_name: str):
+    """
+    Handle CANCEL signal: delete all pending limit/stop orders from MT5.
+    This is triggered when the channel sends a cancellation message
+    like 'Cancelling sell limit orders'.
+    """
+    logger.info(f"[{channel_name}] ❌ Processing CANCEL signal — deleting all pending orders")
+
+    try:
+        orders = mt5.orders_get(symbol=config.SYMBOL)
+        if orders is None or len(orders) == 0:
+            logger.info(f"[{channel_name}] No pending orders found to cancel.")
+            return
+
+        cancelled = 0
+        for order in orders:
+            # Only cancel pending limit/stop orders (not market positions)
+            pending_types = [
+                mt5.ORDER_TYPE_BUY_LIMIT,
+                mt5.ORDER_TYPE_SELL_LIMIT,
+                mt5.ORDER_TYPE_BUY_STOP,
+                mt5.ORDER_TYPE_SELL_STOP,
+            ]
+            if order.type not in pending_types:
+                continue
+
+            request = {
+                "action": mt5.TRADE_ACTION_REMOVE,
+                "order": order.ticket,
+            }
+            result = mt5.order_send(request)
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                logger.info(f"[{channel_name}] ✅ Cancelled pending order #{order.ticket}")
+                cancelled += 1
+            else:
+                logger.error(f"[{channel_name}] ❌ Failed to cancel order #{order.ticket}: {result.comment}")
+
+        logger.info(f"[{channel_name}] Cancel sweep complete: {cancelled} pending order(s) removed.")
+
+    except Exception as e:
+        logger.error(f"[{channel_name}] Exception during CANCEL signal: {e}")
 
 
 async def handle_sl_hit_signal(parsed: dict, channel_name: str):

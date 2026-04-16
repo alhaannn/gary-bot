@@ -31,6 +31,10 @@ SIGNAL TYPES:
 
 6. IGNORE - Everything else (chatter, ads, updates)
 
+7. CANCEL - Cancel/delete all pending orders
+   Keywords: "cancelling", "cancel", "cancelling sell limit", "cancelling buy limit", "cancelling orders", "void", "ignore signal"
+   Example: "Cancelling sell limit orders 💡 Price action is still indecisive"
+
 PRICE RANGE: XAUUSD typically 4000-6000
 
 RESPONSE FORMAT - JSON only, no markdown:
