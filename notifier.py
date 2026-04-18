@@ -2,23 +2,25 @@ import requests
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_CHAT_ID, SUPABASE_URL, SUPABASE_KEY, DASHBOARD_URL
 
 # Supabase REST API headers (no SDK needed)
+# Using "on_conflict=signal_id" for upsert to avoid duplicate rows per signal
 SUPABASE_HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
-    "Prefer": "resolution=merge-duplicates"
+    "Prefer": "resolution=merge-duplicates,return=minimal"
 } if SUPABASE_URL and SUPABASE_KEY else {}
+
 
 def send_telegram_alert(trade_data: dict, action_type: str = "signal"):
     """
     Sends an HTML formatted alert to Telegram.
-    trade_data should contain: pair, action, entry_price, sl, tp, pnl (if close), etc.
+    trade_data: pair, action, entry_price, sl, tp, pnl (if close), channel
     """
     if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    
+
     if action_type == "signal":
         text = (
             f"<b>🚨 NEW SIGNAL DETECTED 🚨</b>\n\n"
@@ -72,14 +74,20 @@ def send_telegram_alert(trade_data: dict, action_type: str = "signal"):
     except Exception as e:
         print(f"Failed to send Telegram alert: {e}")
 
+
 def push_trade_to_db(trade_data: dict, status: str):
     """
-    Pushes or updates trade history in Supabase via REST API (no SDK needed).
-    Uses signal_id as primary key for upsert so we don't create duplicate rows.
+    Pushes or updates trade history in Supabase via REST API.
+
+    Uses 'signal_id' (TEXT) as the unique conflict key for upsert,
+    so updating a trade (OPEN → CLOSED_PARTIAL → CLOSED) only modifies
+    the existing row instead of creating duplicates.
+
+    The 'id' column in Supabase is UUID auto-generated — we never send it.
     """
     if not SUPABASE_HEADERS:
         return
-    
+
     try:
         entry = float(trade_data.get("entry_price")) if trade_data.get("entry_price") else None
         sl = float(trade_data.get("sl")) if trade_data.get("sl") else None
@@ -94,17 +102,20 @@ def push_trade_to_db(trade_data: dict, status: str):
             "tp": tp,
             "status": status,
             "pnl": pnl,
-            "channel": trade_data.get("channel", "Unknown")
+            "channel": trade_data.get("channel", "Unknown"),
         }
 
-        # If trade_data includes an 'id' (signal_id), use it for upsert
+        # Use signal_id (our timestamp-based ID) as the upsert key
+        # This allows OPEN → CLOSED status transitions to UPDATE the same row
         if trade_data.get("id"):
-            row["id"] = trade_data["id"]
+            row["signal_id"] = str(trade_data["id"])
 
-        # Use Supabase REST API directly (PostgREST)
-        api_url = f"{SUPABASE_URL}/rest/v1/trades"
+        # POST with on_conflict=signal_id → upsert on the signal_id unique index
+        api_url = f"{SUPABASE_URL}/rest/v1/trades?on_conflict=signal_id"
         response = requests.post(api_url, json=row, headers=SUPABASE_HEADERS, timeout=5)
         response.raise_for_status()
-        return response.json() if response.text else None
+
+    except requests.exceptions.HTTPError as e:
+        print(f"Failed to push trade to DB: {e} — response: {e.response.text[:300] if e.response else 'N/A'}")
     except Exception as e:
         print(f"Failed to push trade to DB: {e}")

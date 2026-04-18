@@ -52,6 +52,17 @@ def setup_logger():
     logger.addHandler(file_handler)
 
     _logger = logger
+
+    # ── Suppress noisy 3rd-party loggers ─────────────────────────────────────
+    # telethon prints PersistentTimestampOutdatedError and other internal INFO
+    # noise to the console; silence it to ERROR only so real errors still show.
+    logging.getLogger("telethon").setLevel(logging.ERROR)
+    logging.getLogger("telethon.network").setLevel(logging.ERROR)
+    logging.getLogger("telethon.extensions").setLevel(logging.ERROR)
+    # asyncio logs "task exception was never retrieved" sometimes; keep WARNING
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+    # ─────────────────────────────────────────────────────────────────────────
+
     return logger
 
 
